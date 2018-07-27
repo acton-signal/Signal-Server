@@ -110,20 +110,6 @@ public class DirectoryController {
 
   @Timed
   @PUT
-  @Path("/feedback/server-error")
-  public Response putFeedbackServerError(@Auth Account account) {
-    return Response.ok().build();
-  }
-
-  @Timed
-  @PUT
-  @Path("/feedback/client-error")
-  public Response putFeedbackClientError(@Auth Account account) {
-    return Response.ok().build();
-  }
-
-  @Timed
-  @PUT
   @Path("/feedback/attestation-error")
   public Response putFeedbackAttestationError(@Auth Account account) {
     return Response.ok().build();
