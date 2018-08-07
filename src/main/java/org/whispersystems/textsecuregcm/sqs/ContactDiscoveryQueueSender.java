@@ -58,6 +58,14 @@ public class ContactDiscoveryQueueSender {
     this.sqs = AmazonSQSClientBuilder.standard().withCredentials(credentialsProvider).build();
   }
 
+  public void addRegisteredUser(String user) {
+    sendMessage("add", user);
+  }
+
+  public void deleteRegisteredUser(String user) {
+    sendMessage("delete", user);
+  }
+
   private void sendMessage(String action, String user) {
     final Map<String, MessageAttributeValue> messageAttributes = new HashMap<>();
     messageAttributes.put("id", new MessageAttributeValue().withDataType("String").withStringValue(user));
@@ -79,12 +87,4 @@ public class ContactDiscoveryQueueSender {
     }
   }
 
-
-  public void addRegisteredUser(String user) {
-    sendMessage("add", user);
-  }
-
-  public void deleteRegisteredUser(String user) {
-    sendMessage("delete", user);
-  }
 }
