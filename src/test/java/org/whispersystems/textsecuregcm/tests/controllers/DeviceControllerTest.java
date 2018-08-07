@@ -53,7 +53,7 @@ public class DeviceControllerTest {
     public DumbVerificationDeviceController(PendingDevicesManager pendingDevices,
                                             AccountsManager accounts,
                                             MessagesManager messages,
-                                            Optional<ContactDiscoveryQueueSender> cdsSender,
+                                            ContactDiscoveryQueueSender cdsSender,
                                             RateLimiters rateLimiters,
                                             Map<String, Integer> deviceConfiguration)
     {
@@ -89,7 +89,7 @@ public class DeviceControllerTest {
                                                             .addResource(new DumbVerificationDeviceController(pendingDevicesManager,
                                                                                                               accountsManager,
                                                                                                               messagesManager,
-                                                                                                              Optional.of(cdsSender),
+                                                                                                              cdsSender,
                                                                                                               rateLimiters,
                                                                                                               deviceConfiguration))
                                                             .build();

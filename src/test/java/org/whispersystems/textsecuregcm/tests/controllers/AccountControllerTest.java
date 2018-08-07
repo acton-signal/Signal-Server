@@ -67,7 +67,7 @@ public class AccountControllerTest {
                                                                                                accountsManager,
                                                                                                rateLimiters,
                                                                                                smsSender,
-                                                                                               Optional.of(cdsSender),
+                                                                                               cdsSender,
                                                                                                storedMessages,
                                                                                                turnTokenGenerator,
                                                                                                new HashMap<>()))

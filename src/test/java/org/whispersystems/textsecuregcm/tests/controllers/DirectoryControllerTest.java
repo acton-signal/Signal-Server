@@ -55,7 +55,7 @@ public class DirectoryControllerTest {
                                                             .setTestContainerFactory(new GrizzlyWebTestContainerFactory())
                                                             .addResource(new DirectoryController(rateLimiters,
                                                                                                  directoryManager,
-                                                                                                 Optional.of(cdsConfig)))
+                                                                                                 cdsConfig))
                                                             .build();
 
 
