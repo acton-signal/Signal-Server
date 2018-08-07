@@ -27,6 +27,7 @@ import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.configuration.ContactDiscoveryConfiguration;
+import org.whispersystems.textsecuregcm.configuration.DirectoryConfiguration;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
 import org.whispersystems.textsecuregcm.redis.ReplicatedJedisPool;
 import org.whispersystems.textsecuregcm.util.Constants;
@@ -85,20 +86,21 @@ public class DirectoryReconciler implements Managed {
                              ReplicatedJedisPool jedisPool,
                              AccountsManager accountsManager)
   {
-    this.serverApiUrl = cdsConfig.getServerApiUrl();
+    DirectoryConfiguration directoryConfig = cdsConfig.getDirectoryConfiguration();
+    this.serverApiUrl = directoryConfig.getServerApiUrl();
     this.jedisPool = jedisPool;
     this.accountsManager = accountsManager;
 
     SslConfigurator sslConfig = SslConfigurator.newInstance()
                                                .securityProtocol("TLSv1.2");
     try {
-      sslConfig.trustStore(initializeKeyStore(cdsConfig.getServerApiCaCertificate()));
+      sslConfig.trustStore(initializeKeyStore(directoryConfig.getServerApiCaCertificate()));
     } catch (CertificateException ex) {
       logger.error("error reading serverApiCaCertificate from contactDiscovery config", ex);
     }
 
     this.client = ClientBuilder.newBuilder()
-                               .register(HttpAuthenticationFeature.basic("signal", cdsConfig.getServerApiToken().getBytes()))
+                               .register(HttpAuthenticationFeature.basic("signal", directoryConfig.getServerApiToken().getBytes()))
                                .sslContext(sslConfig.createSSLContext())
                                .build();
   }

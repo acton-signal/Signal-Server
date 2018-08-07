@@ -32,6 +32,7 @@ import com.codahale.metrics.SharedMetricRegistries;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.configuration.ContactDiscoveryConfiguration;
+import org.whispersystems.textsecuregcm.configuration.SqsConfiguration;
 import org.whispersystems.textsecuregcm.util.Constants;
 
 import java.util.HashMap;
@@ -51,9 +52,10 @@ public class ContactDiscoveryQueueSender {
   private final AmazonSQS sqs;
 
   public ContactDiscoveryQueueSender(ContactDiscoveryConfiguration config) {
-    final AWSCredentials credentials = new BasicAWSCredentials(config.getAccessKey(), config.getAccessSecret());
+    SqsConfiguration sqsConfig = config.getSqsConfiguration();
+    final AWSCredentials credentials = new BasicAWSCredentials(sqsConfig.getAccessKey(), sqsConfig.getAccessSecret());
     final AWSStaticCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(credentials);
-    this.queueUrl = config.getQueueUrl();
+    this.queueUrl = sqsConfig.getQueueUrl();
     this.sqs = AmazonSQSClientBuilder.standard().withCredentials(credentialsProvider).build();
   }
 

@@ -17,46 +17,31 @@
 package org.whispersystems.textsecuregcm.configuration;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import org.apache.commons.codec.DecoderException;
-import org.apache.commons.codec.binary.Hex;
 import org.hibernate.validator.constraints.NotEmpty;
 
-import javax.validation.Valid;
-import javax.validation.constraints.NotNull;
-
-public class ContactDiscoveryConfiguration {
-
-  @JsonProperty
-  @NotNull
-  @Valid
-  private SqsConfiguration sqs;
-    
-  @JsonProperty
-  @NotNull
-  @Valid
-  private DirectoryConfiguration directory;
+public class DirectoryConfiguration {
 
   @NotEmpty
   @JsonProperty
-  private String userAuthenticationTokenSharedSecret;
+  private String serverApiUrl;
 
   @NotEmpty
   @JsonProperty
-  private String userAuthenticationTokenUserIdSecret;
+  private String serverApiToken;
 
-  public SqsConfiguration getSqsConfiguration() {
-    return sqs;
+  @NotEmpty
+  @JsonProperty
+  private String serverApiCaCertificate;
+
+  public String getServerApiUrl() {
+    return serverApiUrl;
   }
 
-  public DirectoryConfiguration getDirectoryConfiguration() {
-    return directory;
+  public String getServerApiToken() {
+    return serverApiToken;
   }
 
-  public byte[] getUserAuthenticationTokenSharedSecret() throws DecoderException {
-    return Hex.decodeHex(userAuthenticationTokenSharedSecret.toCharArray());
-  }
-
-  public byte[] getUserAuthenticationTokenUserIdSecret() throws DecoderException {
-    return Hex.decodeHex(userAuthenticationTokenUserIdSecret.toCharArray());
+  public String getServerApiCaCertificate() {
+    return serverApiCaCertificate;
   }
 }

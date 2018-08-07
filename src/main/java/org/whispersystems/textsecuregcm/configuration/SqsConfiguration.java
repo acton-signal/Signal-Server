@@ -17,46 +17,32 @@
 package org.whispersystems.textsecuregcm.configuration;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import org.apache.commons.codec.DecoderException;
-import org.apache.commons.codec.binary.Hex;
 import org.hibernate.validator.constraints.NotEmpty;
 
-import javax.validation.Valid;
-import javax.validation.constraints.NotNull;
-
-public class ContactDiscoveryConfiguration {
-
+public class SqsConfiguration {
+  @NotEmpty
   @JsonProperty
-  @NotNull
-  @Valid
-  private SqsConfiguration sqs;
-    
-  @JsonProperty
-  @NotNull
-  @Valid
-  private DirectoryConfiguration directory;
+  private String accessKey;
 
   @NotEmpty
   @JsonProperty
-  private String userAuthenticationTokenSharedSecret;
+  private String accessSecret;
 
   @NotEmpty
   @JsonProperty
-  private String userAuthenticationTokenUserIdSecret;
+  private String queueUrl;
 
-  public SqsConfiguration getSqsConfiguration() {
-    return sqs;
+  public String getAccessKey() {
+    return accessKey;
   }
 
-  public DirectoryConfiguration getDirectoryConfiguration() {
-    return directory;
+  public String getAccessSecret() {
+    return accessSecret;
   }
 
-  public byte[] getUserAuthenticationTokenSharedSecret() throws DecoderException {
-    return Hex.decodeHex(userAuthenticationTokenSharedSecret.toCharArray());
-  }
-
-  public byte[] getUserAuthenticationTokenUserIdSecret() throws DecoderException {
-    return Hex.decodeHex(userAuthenticationTokenUserIdSecret.toCharArray());
+  public String getQueueUrl() {
+    return queueUrl;
   }
 }
+
+   
