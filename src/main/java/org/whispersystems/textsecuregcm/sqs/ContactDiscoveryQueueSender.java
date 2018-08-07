@@ -47,15 +47,17 @@ public class ContactDiscoveryQueueSender {
   private final MetricRegistry metricRegistry    = SharedMetricRegistries.getOrCreate(Constants.METRICS_NAME);
   private final Meter          serviceErrorMeter = metricRegistry.meter(name(ContactDiscoveryQueueSender.class, "serviceError"));
   private final Meter          clientErrorMeter  = metricRegistry.meter(name(ContactDiscoveryQueueSender.class, "clientError"));
+
   private final String         queueUrl;
   private final AmazonSQS      sqs;
 
   public ContactDiscoveryQueueSender(ContactDiscoveryConfiguration config) {
-    SqsConfiguration sqsConfig = config.getSqsConfiguration();
-    final AWSCredentials credentials = new BasicAWSCredentials(sqsConfig.getAccessKey(), sqsConfig.getAccessSecret());
+    final SqsConfiguration             sqsConfig           = config.getSqsConfiguration();
+    final AWSCredentials               credentials         = new BasicAWSCredentials(sqsConfig.getAccessKey(), sqsConfig.getAccessSecret());
     final AWSStaticCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(credentials);
+    
     this.queueUrl = sqsConfig.getQueueUrl();
-    this.sqs = AmazonSQSClientBuilder.standard().withCredentials(credentialsProvider).build();
+    this.sqs      = AmazonSQSClientBuilder.standard().withCredentials(credentialsProvider).build();
   }
 
   public void addRegisteredUser(String user) {
