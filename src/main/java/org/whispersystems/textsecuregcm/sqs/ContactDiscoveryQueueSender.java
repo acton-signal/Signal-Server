@@ -42,14 +42,13 @@ import static com.codahale.metrics.MetricRegistry.name;
 
 public class ContactDiscoveryQueueSender {
 
-  private static final Logger logger = LoggerFactory.getLogger(ContactDiscoveryQueueSender.class);
+  private static final Logger  logger = LoggerFactory.getLogger(ContactDiscoveryQueueSender.class);
 
   private final MetricRegistry metricRegistry    = SharedMetricRegistries.getOrCreate(Constants.METRICS_NAME);
   private final Meter          serviceErrorMeter = metricRegistry.meter(name(ContactDiscoveryQueueSender.class, "serviceError"));
   private final Meter          clientErrorMeter  = metricRegistry.meter(name(ContactDiscoveryQueueSender.class, "clientError"));
-
-  private final String queueUrl;
-  private final AmazonSQS sqs;
+  private final String         queueUrl;
+  private final AmazonSQS      sqs;
 
   public ContactDiscoveryQueueSender(ContactDiscoveryConfiguration config) {
     SqsConfiguration sqsConfig = config.getSqsConfiguration();
