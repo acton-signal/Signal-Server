@@ -62,14 +62,14 @@ public class ContactDiscoveryQueueSender {
     final Map<String, MessageAttributeValue> messageAttributes = new HashMap<>();
     messageAttributes.put("id", new MessageAttributeValue().withDataType("String").withStringValue(user));
     messageAttributes.put("action", new MessageAttributeValue().withDataType("String").withStringValue(action));
-    SendMessageRequest send_msg_request = new SendMessageRequest()
+    SendMessageRequest sendMessageRequest = new SendMessageRequest()
             .withQueueUrl(queueUrl)
             .withMessageBody("-")
             .withMessageDeduplicationId(user + action)
             .withMessageGroupId(user)
             .withMessageAttributes(messageAttributes);
     try {
-      sqs.sendMessage(send_msg_request);
+      sqs.sendMessage(sendMessageRequest);
     } catch (AmazonServiceException ex) {
       serviceErrorMeter.mark();
       logger.warn("sqs service error: ", ex);
