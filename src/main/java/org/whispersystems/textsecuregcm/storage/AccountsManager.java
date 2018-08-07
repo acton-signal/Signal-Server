@@ -61,8 +61,12 @@ public class AccountsManager {
     return accounts.getAll();
   }
 
-  public List<String> getNumbersInBucket(long mask, long bucket) {
-    return accounts.getNumbersInBucket(mask, bucket);
+  public List<String> getAllNumbers(int length) {
+    return accounts.getAllNumbers(length);
+  }
+
+  public List<String> getAllNumbers(String from, int length) {
+    return accounts.getAllNumbers(from, length);
   }
 
   public boolean create(Account account) {

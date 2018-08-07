@@ -20,6 +20,7 @@ import com.codahale.metrics.Meter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.SharedMetricRegistries;
 import com.codahale.metrics.Timer;
+import com.google.common.base.Optional;
 import io.dropwizard.lifecycle.Managed;
 import org.bouncycastle.openssl.PEMReader;
 import org.glassfish.jersey.SslConfigurator;
@@ -29,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.configuration.ContactDiscoveryConfiguration;
 import org.whispersystems.textsecuregcm.configuration.DirectoryConfiguration;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
+import org.whispersystems.textsecuregcm.redis.LuaScript;
 import org.whispersystems.textsecuregcm.redis.ReplicatedJedisPool;
 import org.whispersystems.textsecuregcm.util.Constants;
 import org.whispersystems.textsecuregcm.util.Hex;
@@ -50,6 +52,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
@@ -59,21 +62,23 @@ public class DirectoryReconciler implements Managed {
 
   private static final Logger logger = LoggerFactory.getLogger(DirectoryReconciler.class);
 
-  private static final MetricRegistry metricRegistry       = SharedMetricRegistries.getOrCreate(Constants.METRICS_NAME);
-  private static final Timer          readBucketTimer      = metricRegistry.timer(name(DirectoryReconciler.class, "readBucket"));
-  private static final Timer          sendBucketTimer      = metricRegistry.timer(name(DirectoryReconciler.class, "sendBucket"));
-  private static final Meter          sendBucketErrorMeter = metricRegistry.meter(name(DirectoryReconciler.class, "sendBucketError"));
+  private static final MetricRegistry metricRegistry      = SharedMetricRegistries.getOrCreate(Constants.METRICS_NAME);
+  private static final Timer          readChunkTimer      = metricRegistry.timer(name(DirectoryReconciler.class, "readChunk"));
+  private static final Timer          sendChunkTimer      = metricRegistry.timer(name(DirectoryReconciler.class, "sendChunk"));
+  private static final Meter          sendChunkErrorMeter = metricRegistry.meter(name(DirectoryReconciler.class, "sendChunkError"));
 
-  private static final String   WORKERS_KEY   = "directory_reconciliation_workers";
-  private static final String   COUNTER_KEY   = "directory_reconciliation_counter";
-  private static final long     WORKER_TTL_MS = 120_000L;
-  private static final long     BUCKET_ORDER  = 11L;
-  private static final long     BUCKET_COUNT  = 1L << BUCKET_ORDER;
-  private static final double   JITTER_MAX    = 0.20;
-  private static final String[] COUNTER_ARGS  = {
-          "OVERFLOW", "WRAP",
-          "INCRBY", "u32", "0", "1",
-          };
+  private static final String WORKERS_KEY       = "directory_reconciliation_workers";
+  private static final String ACTIVE_WORKER_KEY = "directory_reconciliation_active_worker";
+  private static final String LAST_NUMBER_KEY   = "directory_reconciliation_last_number";
+  private static final String CACHED_COUNT_KEY  = "directory_reconciliation_cached_count";
+  private static final String ACCELERATE_KEY    = "directory_reconciliation_accelerate";
+
+  private static final long   CACHED_COUNT_TTL_MS       = 21600_000L;
+  private static final long   WORKER_TTL_MS             = 120_000L;
+  private static final long   PERIOD                    = 86400_000L;
+  private static final long   CHUNK_INTERVAL            = 42_000L;
+  private static final long   ACCELERATE_CHUNK_INTERVAL = 500L;
+  private static final double JITTER_MAX                = 0.20;
 
   private final String              serverApiUrl;
   private final ReplicatedJedisPool jedisPool;
@@ -128,14 +133,14 @@ public class DirectoryReconciler implements Managed {
   }
 
   @Override
-  public void start() {
+  public void start() throws Exception {
     this.directoryReconciliationWorker = new DirectoryReconciliationWorker(serverApiUrl, jedisPool, accountsManager, client);
 
     this.directoryReconciliationWorker.start();
   }
 
   @Override
-  public void stop() {
+  public void stop() throws Exception {
     directoryReconciliationWorker.shutdown();
   }
 
@@ -146,8 +151,10 @@ public class DirectoryReconciler implements Managed {
     private final AccountsManager     accountsManager;
     private final Client              client;
 
-    private final String workerId;
-    private final Random random;
+    private final String       workerId;
+    private final SecureRandom random;
+
+    private final UnlockOperation unlockOperation;
 
     private boolean running  = true;
     private boolean finished = false;
@@ -156,20 +163,21 @@ public class DirectoryReconciler implements Managed {
                                   ReplicatedJedisPool jedisPool,
                                   AccountsManager accountsManager,
                                   Client client)
+        throws IOException
     {
       super(DirectoryReconciliationWorker.class.getSimpleName());
 
-      this.serverApiUrl = serverApiUrl;
-      this.jedisPool = jedisPool;
+      this.serverApiUrl    = serverApiUrl;
+      this.jedisPool       = jedisPool;
       this.accountsManager = accountsManager;
-      this.client = client;
+      this.client          = client;
+      this.random          = new SecureRandom();
 
-      SecureRandom secureRandom  = new SecureRandom();
-      byte[]       workerIdBytes = new byte[16];
-      secureRandom.nextBytes(new byte[16]);
+      byte[] workerIdBytes = new byte[16];
+      random.nextBytes(workerIdBytes);
       this.workerId = Hex.toString(workerIdBytes);
 
-      this.random = new Random(secureRandom.nextLong());
+      this.unlockOperation = new UnlockOperation(jedisPool);
     }
 
     synchronized void shutdown() {
@@ -179,7 +187,7 @@ public class DirectoryReconciler implements Managed {
       }
     }
 
-    synchronized boolean sleepWhileRunning(long delay) {
+    private synchronized boolean sleepWhileRunning(long delay) {
       long start   = System.currentTimeMillis();
       long elapsed = 0;
       while (running && elapsed < delay) {
@@ -192,31 +200,77 @@ public class DirectoryReconciler implements Managed {
       return running;
     }
 
-    private List<String> readBucket(long bucket) {
-      Timer.Context timer = readBucketTimer.time();
-      try {
-        return accountsManager.getNumbersInBucket((1L << BUCKET_ORDER) - 1L, bucket);
-      } finally {
-        timer.stop();
+    private List<String> readChunk(Optional<String> from, int chunkSize) {
+      try (Timer.Context timer = readChunkTimer.time()) {
+        if (from.isPresent()) {
+          return accountsManager.getAllNumbers(from.get(), chunkSize);
+        } else {
+          return accountsManager.getAllNumbers(chunkSize);
+        }
       }
     }
 
-    private void sendBucket(long bucket, List<String> numbers) {
-      Timer.Context timer = sendBucketTimer.time();
-      try {
+    private Optional<Response> sendChunk(Optional<String> fromNumber, List<String> numbers) {
+      String reconcilePath;
+      if (fromNumber.isPresent()) {
+        reconcilePath = String.format("/v1/directory/reconcile/%s", fromNumber);
+      } else {
+        reconcilePath = "/v1/directory/reconcile";
+      }
+
+      try (Timer.Context timer = sendChunkTimer.time()) {
         Response response = client.target(serverApiUrl)
-                                  .path(String.format("/v1/directory/reconcile/%d/%d", BUCKET_COUNT, bucket))
+                                  .path(reconcilePath)
                                   .request(MediaType.APPLICATION_JSON)
                                   .put(Entity.json(new DirectoryReconciliationRequest(numbers)));
         if (response.getStatus() != 200) {
-          sendBucketErrorMeter.mark();
+          sendChunkErrorMeter.mark();
           logger.warn("http error " + response.getStatus());
         }
+        return Optional.of(response);
       } catch (ProcessingException ex) {
-        sendBucketErrorMeter.mark();
+        sendChunkErrorMeter.mark();
         logger.warn("request error: ", ex);
-      } finally {
-        timer.stop();
+        return Optional.absent();
+      }
+    }
+
+    private void processChunk(Jedis jedis) {
+      Optional<String> fromNumber     = Optional.fromNullable(jedis.get(LAST_NUMBER_KEY));
+      Optional<String> cachedCountStr = Optional.fromNullable(jedis.get(CACHED_COUNT_KEY));
+      Optional<Long>   cachedCount    = Optional.absent();
+      if (cachedCountStr.isPresent()) {
+        cachedCount = tryParseLong(cachedCountStr.get());
+      }
+
+      if (!cachedCount.isPresent()) {
+        cachedCount = Optional.of(accountsManager.getCount());
+        jedis.psetex(CACHED_COUNT_KEY, CACHED_COUNT_TTL_MS, Long.toString(cachedCount.get()));
+      }
+
+      int              chunkSize = (int) (cachedCount.get() * PERIOD / CHUNK_INTERVAL);
+      List<String>     numbers   = readChunk(fromNumber, chunkSize);
+
+      Optional<String> toNumber = Optional.absent();
+      if (!numbers.isEmpty()) {
+        toNumber = Optional.of(numbers.get(numbers.size() - 1));
+      }
+
+      Optional<Response> sendChunkResp = sendChunk(fromNumber, numbers);
+      if (sendChunkResp.isPresent()) {
+        if (sendChunkResp.get().getStatus() == 200) {
+          if (toNumber.isPresent()) {
+            jedis.set(LAST_NUMBER_KEY, toNumber.get());
+          } else {
+            jedis.del(ACCELERATE_KEY);
+            jedis.del(LAST_NUMBER_KEY);
+          }
+        } else {
+          jedis.del(ACCELERATE_KEY);
+          if (sendChunkResp.get().getStatus() == 404) {
+            jedis.del(LAST_NUMBER_KEY);
+          }
+        }
       }
     }
 
@@ -227,9 +281,11 @@ public class DirectoryReconciler implements Managed {
       try (Jedis jedis = jedisPool.getWriteResource()) {
         long nowMs = System.currentTimeMillis();
         jedis.zremrangeByScore(WORKERS_KEY, Double.NEGATIVE_INFINITY, (double) (nowMs - WORKER_TTL_MS));
+      } catch (Exception ex) {
+        logger.warn("failed to clean up worker set", ex);
       }
 
-      long workIntervalMs = 0;
+      long workIntervalMs = CHUNK_INTERVAL;
       long lastWorkTimeMs = 0;
       long lastPingTimeMs = 0;
       long randomJitterMs = 0;
@@ -237,32 +293,45 @@ public class DirectoryReconciler implements Managed {
                                         lastPingTimeMs + WORKER_TTL_MS / 2) - System.currentTimeMillis())) {
         long nowMs = System.currentTimeMillis();
 
-        try (Jedis jedis = jedisPool.getWriteResource()) {
-          lastPingTimeMs = nowMs;
+        lastPingTimeMs = nowMs;
 
+        try (Jedis jedis = jedisPool.getWriteResource()) {
           jedis.zadd(WORKERS_KEY, (double) nowMs, workerId);
 
           if (nowMs - lastWorkTimeMs > workIntervalMs + randomJitterMs) {
             lastWorkTimeMs = nowMs;
 
-            long workerCount = jedis.zcount(WORKERS_KEY, (double) (nowMs - WORKER_TTL_MS), Double.POSITIVE_INFINITY);
+            boolean accelerate = false;
+            if ("OK".equals(jedis.set(ACTIVE_WORKER_KEY, workerId, "NX", "PX", CHUNK_INTERVAL))) {
+              try {
+                processChunk(jedis);
+                accelerate = "1".equals(jedis.get(ACCELERATE_KEY));
+              } finally {
+                unlockOperation.unlock(ACTIVE_WORKER_KEY, workerId);
+              }
+            }
 
-            workIntervalMs = 86400_000L * workerCount / BUCKET_COUNT;
-            randomJitterMs = (long) (random.nextDouble() * JITTER_MAX * workIntervalMs);
-
-            long counter = jedis.bitfield(COUNTER_KEY, COUNTER_ARGS).get(0);
-            long bucket  = counter % BUCKET_COUNT;
-
-            List<String> numbers = readBucket(bucket);
-            sendBucket(bucket, numbers);
+            if (!accelerate) {
+              long workerCount = jedis.zcount(WORKERS_KEY, (double) (nowMs - WORKER_TTL_MS), Double.POSITIVE_INFINITY);
+              workIntervalMs   = CHUNK_INTERVAL * workerCount;
+              randomJitterMs   = (long) (random.nextDouble() * JITTER_MAX * workIntervalMs);
+            } else {
+              workIntervalMs = ACCELERATE_CHUNK_INTERVAL;
+              randomJitterMs = 0;
+            }
           } else if (lastWorkTimeMs > nowMs) {
             lastWorkTimeMs = nowMs;
           }
+        } catch (Exception ex) {
+          logger.warn("error in directory reconciliation", ex);
+          lastWorkTimeMs = nowMs;
         }
       }
 
       try (Jedis jedis = jedisPool.getWriteResource()) {
         jedis.zrem(WORKERS_KEY, workerId);
+      } catch (Exception ex) {
+        logger.warn("failed to remove from worker set", ex);
       }
 
       logger.info("Directory reconciliation worker " + workerId + " shut down");
@@ -273,6 +342,30 @@ public class DirectoryReconciler implements Managed {
       }
     }
 
+  }
+
+  public static Optional<Long> tryParseLong(String str) {
+    try {
+      return Optional.of(Long.getLong(str));
+    } catch (NumberFormatException ex) {
+      return Optional.absent();
+    }
+  }
+
+  public static class UnlockOperation {
+
+    private final LuaScript luaScript;
+
+    UnlockOperation(ReplicatedJedisPool jedisPool) throws IOException {
+      this.luaScript = LuaScript.fromResource(jedisPool, "lua/unlock.lua");
+    }
+
+    boolean unlock(String key, String value) {
+      List<byte[]> keys = Arrays.asList(key.getBytes());
+      List<byte[]> args = Arrays.asList(value.getBytes());
+
+      return ((long)luaScript.execute(keys, args)) > 0;
+    }
   }
 
 }
