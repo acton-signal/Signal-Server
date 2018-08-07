@@ -58,7 +58,7 @@ import java.util.Random;
 
 import static com.codahale.metrics.MetricRegistry.name;
 
-public class DirectoryReconciler implements Managed {
+public class DirectoryReconciler implements Managed, Runnable {
 
   private static final Logger logger = LoggerFactory.getLogger(DirectoryReconciler.class);
 
@@ -85,16 +85,32 @@ public class DirectoryReconciler implements Managed {
   private final AccountsManager     accountsManager;
   private final Client              client;
 
-  private DirectoryReconciliationWorker directoryReconciliationWorker;
+  private final String       workerId;
+  private final SecureRandom random;
+
+  private final UnlockOperation unlockOperation;
+
+  private boolean running;
+  private boolean finished;
+
 
   public DirectoryReconciler(ContactDiscoveryConfiguration cdsConfig,
                              ReplicatedJedisPool jedisPool,
                              AccountsManager accountsManager)
+      throws IOException
   {
     DirectoryConfiguration directoryConfig = cdsConfig.getDirectoryConfiguration();
-    this.serverApiUrl = directoryConfig.getServerApiUrl();
-    this.jedisPool = jedisPool;
+    this.serverApiUrl    = directoryConfig.getServerApiUrl();
+    this.jedisPool       = jedisPool;
     this.accountsManager = accountsManager;
+
+    this.random = new SecureRandom();
+
+    byte[] workerIdBytes = new byte[16];
+    random.nextBytes(workerIdBytes);
+    this.workerId = Hex.toString(workerIdBytes);
+
+    this.unlockOperation = new UnlockOperation(jedisPool);
 
     SslConfigurator sslConfig = SslConfigurator.newInstance()
                                                .securityProtocol("TLSv1.2");
@@ -133,215 +149,172 @@ public class DirectoryReconciler implements Managed {
   }
 
   @Override
-  public void start() throws Exception {
-    this.directoryReconciliationWorker = new DirectoryReconciliationWorker(serverApiUrl, jedisPool, accountsManager, client);
-
-    this.directoryReconciliationWorker.start();
+  public synchronized void start() throws Exception {
+    running  = true;
+    finished = false;
+    new Thread(this).start();
   }
 
   @Override
-  public void stop() throws Exception {
-    directoryReconciliationWorker.shutdown();
+  public synchronized void stop() throws Exception {
+    running = false;
+    while (!finished) Util.wait(this);
   }
 
-  private static class DirectoryReconciliationWorker extends Thread {
-
-    private final String              serverApiUrl;
-    private final ReplicatedJedisPool jedisPool;
-    private final AccountsManager     accountsManager;
-    private final Client              client;
-
-    private final String       workerId;
-    private final SecureRandom random;
-
-    private final UnlockOperation unlockOperation;
-
-    private boolean running  = true;
-    private boolean finished = false;
-
-    DirectoryReconciliationWorker(String serverApiUrl,
-                                  ReplicatedJedisPool jedisPool,
-                                  AccountsManager accountsManager,
-                                  Client client)
-        throws IOException
-    {
-      super(DirectoryReconciliationWorker.class.getSimpleName());
-
-      this.serverApiUrl    = serverApiUrl;
-      this.jedisPool       = jedisPool;
-      this.accountsManager = accountsManager;
-      this.client          = client;
-      this.random          = new SecureRandom();
-
-      byte[] workerIdBytes = new byte[16];
-      random.nextBytes(workerIdBytes);
-      this.workerId = Hex.toString(workerIdBytes);
-
-      this.unlockOperation = new UnlockOperation(jedisPool);
-    }
-
-    synchronized void shutdown() {
-      running = false;
-      while (!finished) {
-        Util.wait(this);
+  private synchronized boolean sleepWhileRunning(long delay) {
+    long start   = System.currentTimeMillis();
+    long elapsed = 0;
+    while (running && elapsed < delay) {
+      try {
+        wait(delay - elapsed);
+      } catch (InterruptedException ex) {
       }
+      elapsed = System.currentTimeMillis() - start;
     }
+    return running;
+  }
 
-    private synchronized boolean sleepWhileRunning(long delay) {
-      long start   = System.currentTimeMillis();
-      long elapsed = 0;
-      while (running && elapsed < delay) {
-        try {
-          wait(delay - elapsed);
-        } catch (InterruptedException ex) {
-        }
-        elapsed = System.currentTimeMillis() - start;
-      }
-      return running;
-    }
-
-    private List<String> readChunk(Optional<String> from, int chunkSize) {
-      try (Timer.Context timer = readChunkTimer.time()) {
-        if (from.isPresent()) {
-          return accountsManager.getAllNumbers(from.get(), chunkSize);
-        } else {
-          return accountsManager.getAllNumbers(chunkSize);
-        }
-      }
-    }
-
-    private Optional<Response> sendChunk(Optional<String> fromNumber, List<String> numbers) {
-      String reconcilePath;
-      if (fromNumber.isPresent()) {
-        reconcilePath = String.format("/v1/directory/reconcile/%s", fromNumber);
+  private List<String> readChunk(Optional<String> from, int chunkSize) {
+    try (Timer.Context timer = readChunkTimer.time()) {
+      if (from.isPresent()) {
+        return accountsManager.getAllNumbers(from.get(), chunkSize);
       } else {
-        reconcilePath = "/v1/directory/reconcile";
-      }
-
-      try (Timer.Context timer = sendChunkTimer.time()) {
-        Response response = client.target(serverApiUrl)
-                                  .path(reconcilePath)
-                                  .request(MediaType.APPLICATION_JSON)
-                                  .put(Entity.json(new DirectoryReconciliationRequest(numbers)));
-        if (response.getStatus() != 200) {
-          sendChunkErrorMeter.mark();
-          logger.warn("http error " + response.getStatus());
-        }
-        return Optional.of(response);
-      } catch (ProcessingException ex) {
-        sendChunkErrorMeter.mark();
-        logger.warn("request error: ", ex);
-        return Optional.absent();
+        return accountsManager.getAllNumbers(chunkSize);
       }
     }
+  }
 
-    private void processChunk(Jedis jedis) {
-      Optional<String> fromNumber     = Optional.fromNullable(jedis.get(LAST_NUMBER_KEY));
-      Optional<String> cachedCountStr = Optional.fromNullable(jedis.get(CACHED_COUNT_KEY));
-      Optional<Long>   cachedCount    = Optional.absent();
-      if (cachedCountStr.isPresent()) {
-        cachedCount = tryParseLong(cachedCountStr.get());
+  private Optional<Response> sendChunk(Optional<String> fromNumber, List<String> numbers) {
+    String reconcilePath;
+    if (fromNumber.isPresent()) {
+      reconcilePath = String.format("/v1/directory/reconcile/%s", fromNumber);
+    } else {
+      reconcilePath = "/v1/directory/reconcile";
+    }
+
+    try (Timer.Context timer = sendChunkTimer.time()) {
+      Response response = client.target(serverApiUrl)
+                                .path(reconcilePath)
+                                .request(MediaType.APPLICATION_JSON)
+                                .put(Entity.json(new DirectoryReconciliationRequest(numbers)));
+      if (response.getStatus() != 200) {
+        sendChunkErrorMeter.mark();
+        logger.warn("http error " + response.getStatus());
       }
+      return Optional.of(response);
+    } catch (ProcessingException ex) {
+      sendChunkErrorMeter.mark();
+      logger.warn("request error: ", ex);
+      return Optional.absent();
+    }
+  }
 
-      if (!cachedCount.isPresent()) {
-        cachedCount = Optional.of(accountsManager.getCount());
-        jedis.psetex(CACHED_COUNT_KEY, CACHED_COUNT_TTL_MS, Long.toString(cachedCount.get()));
-      }
+  private void processChunk(Jedis jedis) {
+    Optional<String> fromNumber     = Optional.fromNullable(jedis.get(LAST_NUMBER_KEY));
+    Optional<String> cachedCountStr = Optional.fromNullable(jedis.get(CACHED_COUNT_KEY));
+    Optional<Long>   cachedCount    = Optional.absent();
+    if (cachedCountStr.isPresent()) {
+      cachedCount = tryParseLong(cachedCountStr.get());
+    }
 
-      int              chunkSize = (int) (cachedCount.get() * PERIOD / CHUNK_INTERVAL);
-      List<String>     numbers   = readChunk(fromNumber, chunkSize);
+    if (!cachedCount.isPresent()) {
+      cachedCount = Optional.of(accountsManager.getCount());
+      jedis.psetex(CACHED_COUNT_KEY, CACHED_COUNT_TTL_MS, Long.toString(cachedCount.get()));
+    }
 
-      Optional<String> toNumber = Optional.absent();
-      if (!numbers.isEmpty()) {
-        toNumber = Optional.of(numbers.get(numbers.size() - 1));
-      }
+    int          chunkSize = (int) (cachedCount.get() * PERIOD / CHUNK_INTERVAL);
+    List<String> numbers   = readChunk(fromNumber, chunkSize);
 
-      Optional<Response> sendChunkResp = sendChunk(fromNumber, numbers);
-      if (sendChunkResp.isPresent()) {
-        if (sendChunkResp.get().getStatus() == 200) {
-          if (toNumber.isPresent()) {
-            jedis.set(LAST_NUMBER_KEY, toNumber.get());
-          } else {
-            jedis.del(ACCELERATE_KEY);
-            jedis.del(LAST_NUMBER_KEY);
-          }
+    Optional<String> toNumber = Optional.absent();
+    if (!numbers.isEmpty()) {
+      toNumber = Optional.of(numbers.get(numbers.size() - 1));
+    }
+
+    Optional<Response> sendChunkResp = sendChunk(fromNumber, numbers);
+    if (sendChunkResp.isPresent()) {
+      if (sendChunkResp.get().getStatus() == 200) {
+        if (toNumber.isPresent()) {
+          jedis.set(LAST_NUMBER_KEY, toNumber.get());
         } else {
           jedis.del(ACCELERATE_KEY);
-          if (sendChunkResp.get().getStatus() == 404) {
-            jedis.del(LAST_NUMBER_KEY);
-          }
+          jedis.del(LAST_NUMBER_KEY);
+        }
+      } else {
+        jedis.del(ACCELERATE_KEY);
+        if (sendChunkResp.get().getStatus() == 404) {
+          jedis.del(LAST_NUMBER_KEY);
         }
       }
     }
+  }
 
-    @Override
-    public void run() {
-      logger.info("Directory reconciliation worker " + workerId + " started");
+  @Override
+  public void run() {
+    logger.info("Directory reconciliation worker " + workerId + " started");
+
+    try (Jedis jedis = jedisPool.getWriteResource()) {
+      long nowMs = System.currentTimeMillis();
+      jedis.zremrangeByScore(WORKERS_KEY, Double.NEGATIVE_INFINITY, (double) (nowMs - WORKER_TTL_MS));
+    } catch (Exception ex) {
+      logger.warn("failed to clean up worker set", ex);
+    }
+
+    long workIntervalMs = CHUNK_INTERVAL;
+    long lastWorkTimeMs = 0;
+    long lastPingTimeMs = 0;
+    long randomJitterMs = 0;
+    while (sleepWhileRunning(Math.min(lastWorkTimeMs + workIntervalMs + randomJitterMs,
+                                      lastPingTimeMs + WORKER_TTL_MS / 2) - System.currentTimeMillis())) {
+      long nowMs = System.currentTimeMillis();
+
+      lastPingTimeMs = nowMs;
 
       try (Jedis jedis = jedisPool.getWriteResource()) {
-        long nowMs = System.currentTimeMillis();
-        jedis.zremrangeByScore(WORKERS_KEY, Double.NEGATIVE_INFINITY, (double) (nowMs - WORKER_TTL_MS));
-      } catch (Exception ex) {
-        logger.warn("failed to clean up worker set", ex);
-      }
+        jedis.zadd(WORKERS_KEY, (double) nowMs, workerId);
 
-      long workIntervalMs = CHUNK_INTERVAL;
-      long lastWorkTimeMs = 0;
-      long lastPingTimeMs = 0;
-      long randomJitterMs = 0;
-      while (sleepWhileRunning(Math.min(lastWorkTimeMs + workIntervalMs + randomJitterMs,
-                                        lastPingTimeMs + WORKER_TTL_MS / 2) - System.currentTimeMillis())) {
-        long nowMs = System.currentTimeMillis();
+        if (nowMs - lastWorkTimeMs > workIntervalMs + randomJitterMs) {
+          lastWorkTimeMs = nowMs;
 
-        lastPingTimeMs = nowMs;
-
-        try (Jedis jedis = jedisPool.getWriteResource()) {
-          jedis.zadd(WORKERS_KEY, (double) nowMs, workerId);
-
-          if (nowMs - lastWorkTimeMs > workIntervalMs + randomJitterMs) {
-            lastWorkTimeMs = nowMs;
-
-            boolean accelerate = false;
-            if ("OK".equals(jedis.set(ACTIVE_WORKER_KEY, workerId, "NX", "PX", CHUNK_INTERVAL))) {
-              try {
-                processChunk(jedis);
-                accelerate = "1".equals(jedis.get(ACCELERATE_KEY));
-              } finally {
-                unlockOperation.unlock(ACTIVE_WORKER_KEY, workerId);
-              }
+          boolean accelerate = false;
+          if ("OK".equals(jedis.set(ACTIVE_WORKER_KEY, workerId, "NX", "PX", CHUNK_INTERVAL))) {
+            try {
+              processChunk(jedis);
+              accelerate = "1".equals(jedis.get(ACCELERATE_KEY));
+            } finally {
+              unlockOperation.unlock(ACTIVE_WORKER_KEY, workerId);
             }
-
-            if (!accelerate) {
-              long workerCount = jedis.zcount(WORKERS_KEY, (double) (nowMs - WORKER_TTL_MS), Double.POSITIVE_INFINITY);
-              workIntervalMs   = CHUNK_INTERVAL * workerCount;
-              randomJitterMs   = (long) (random.nextDouble() * JITTER_MAX * workIntervalMs);
-            } else {
-              workIntervalMs = ACCELERATE_CHUNK_INTERVAL;
-              randomJitterMs = 0;
-            }
-          } else if (lastWorkTimeMs > nowMs) {
-            lastWorkTimeMs = nowMs;
           }
-        } catch (Exception ex) {
-          logger.warn("error in directory reconciliation", ex);
+
+          if (!accelerate) {
+            long workerCount = jedis.zcount(WORKERS_KEY, (double) (nowMs - WORKER_TTL_MS), Double.POSITIVE_INFINITY);
+
+            workIntervalMs = CHUNK_INTERVAL * workerCount;
+            randomJitterMs = (long) (random.nextDouble() * JITTER_MAX * workIntervalMs);
+          } else {
+            workIntervalMs = ACCELERATE_CHUNK_INTERVAL;
+            randomJitterMs = 0;
+          }
+        } else if (lastWorkTimeMs > nowMs) {
           lastWorkTimeMs = nowMs;
         }
-      }
-
-      try (Jedis jedis = jedisPool.getWriteResource()) {
-        jedis.zrem(WORKERS_KEY, workerId);
       } catch (Exception ex) {
-        logger.warn("failed to remove from worker set", ex);
-      }
-
-      logger.info("Directory reconciliation worker " + workerId + " shut down");
-
-      synchronized (this) {
-        finished = true;
-        notifyAll();
+        logger.warn("error in directory reconciliation", ex);
+        lastWorkTimeMs = nowMs;
       }
     }
 
+    try (Jedis jedis = jedisPool.getWriteResource()) {
+      jedis.zrem(WORKERS_KEY, workerId);
+    } catch (Exception ex) {
+      logger.warn("failed to remove from worker set", ex);
+    }
+
+    logger.info("Directory reconciliation worker " + workerId + " shut down");
+
+    synchronized (this) {
+      finished = true;
+      notifyAll();
+    }
   }
 
   public static Optional<Long> tryParseLong(String str) {
