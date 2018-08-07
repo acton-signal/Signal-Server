@@ -62,6 +62,7 @@ public class WhisperServerConfiguration extends Configuration {
   @JsonProperty
   private AttachmentsConfiguration attachments;
 
+  @NotNull
   @Valid
   @JsonProperty
   private ContactDiscoveryConfiguration contactDiscovery;
