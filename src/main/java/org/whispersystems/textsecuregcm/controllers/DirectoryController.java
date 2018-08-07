@@ -67,22 +67,18 @@ public class DirectoryController {
 
   public DirectoryController(RateLimiters rateLimiters,
                              DirectoryManager directory,
-                             Optional<ContactDiscoveryConfiguration> cdsConfig)
+                             ContactDiscoveryConfiguration cdsConfig)
   {
     this.directory    = directory;
     this.rateLimiters = rateLimiters;
 
-    if (cdsConfig.isPresent()) {
-      try {
-        this.userTokenGenerator = Optional.of(new AuthorizationTokenGenerator(
-                cdsConfig.get().getUserAuthenticationTokenSharedSecret(),
-                Optional.of(cdsConfig.get().getUserAuthenticationTokenUserIdSecret())
-        ));
-      } catch (DecoderException e) {
-        throw new IllegalArgumentException(e);
-      }
-    } else {
-      this.userTokenGenerator = Optional.absent();
+    try {
+      this.userTokenGenerator = Optional.of(new AuthorizationTokenGenerator(
+              cdsConfig.getUserAuthenticationTokenSharedSecret(),
+              Optional.of(cdsConfig.getUserAuthenticationTokenUserIdSecret())
+      ));
+    } catch (DecoderException e) {
+      throw new IllegalArgumentException(e);
     }
   }
 

@@ -151,7 +151,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.getObjectMapper().setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.NONE);
     environment.getObjectMapper().setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY);
 
-    Optional<ContactDiscoveryConfiguration> cdsConfig = Optional.fromNullable(config.getContactDiscoveryConfiguration());
+    ContactDiscoveryConfiguration cdsConfig = config.getContactDiscoveryConfiguration();
 
     DBIFactory dbiFactory = new DBIFactory();
     DBI        database   = dbiFactory.build(environment, config.getDataSourceFactory(), "accountdb");
@@ -198,10 +198,8 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     ReceiptSender            receiptSender       = new ReceiptSender(accountsManager, pushSender, federatedClientManager);
     TurnTokenGenerator       turnTokenGenerator  = new TurnTokenGenerator(config.getTurnConfiguration());
 
-    Optional<ContactDiscoveryQueueSender> cdsSender   = cdsConfig.transform(ContactDiscoveryQueueSender::new);
-    Optional<DirectoryReconciler> directoryReconciler = cdsConfig.transform(
-            gotCdsConfig -> new DirectoryReconciler(gotCdsConfig, cacheClient, accountsManager)
-    );
+    ContactDiscoveryQueueSender cdsSender           = new ContactDiscoveryQueueSender(cdsConfig);
+    DirectoryReconciler         directoryReconciler = new DirectoryReconciler(cdsConfig, cacheClient, accountsManager);
 
     messagesCache.setPubSubManager(pubSubManager, pushSender);
 
@@ -210,9 +208,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.lifecycle().manage(pubSubManager);
     environment.lifecycle().manage(pushSender);
     environment.lifecycle().manage(messagesCache);
-    if (directoryReconciler.isPresent()) {
-      environment.lifecycle().manage(directoryReconciler.get());
-    }
+    environment.lifecycle().manage(directoryReconciler);
 
     AttachmentController attachmentController = new AttachmentController(rateLimiters, federatedClientManager, urlSigner);
     KeysController       keysController       = new KeysController(rateLimiters, keys, accountsManager, federatedClientManager);
