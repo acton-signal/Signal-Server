@@ -86,6 +86,8 @@ public class ContactDiscoveryQueueSender {
     } catch (AmazonClientException ex) {
       clientErrorMeter.mark();
       logger.warn("sqs client error: ", ex);
+    } catch (Throwable t) {
+      logger.warn("sqs unexpected error: ", t);
     }
   }
 

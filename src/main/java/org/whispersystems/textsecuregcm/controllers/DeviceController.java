@@ -113,12 +113,8 @@ public class DeviceController {
 
     account.removeDevice(deviceId);
     accounts.update(account);
-    try {
-      if (!account.isActive()) {
-        cdsSender.deleteRegisteredUser(account.getNumber());
-      }
-    } catch (Throwable t) {
-      logger.warn("ContactDiscoveryQueueSender.deleteRegisteredUser error: ", t);
+    if (!account.isActive()) {
+      cdsSender.deleteRegisteredUser(account.getNumber());
     }
     messages.clear(account.getNumber(), deviceId);
   }

@@ -343,11 +343,7 @@ public class AccountController {
     if (accounts.create(account)) {
       newUserMeter.mark();
     }
-    try {
-      cdsSender.addRegisteredUser(number);
-    } catch (Throwable t) {
-      logger.warn("ContactDiscoveryQueueSender.addRegisteredUser error: ", t);
-    }
+    cdsSender.addRegisteredUser(number);
 
     messagesManager.clear(number);
     pendingAccounts.remove(number);
