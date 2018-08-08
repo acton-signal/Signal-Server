@@ -60,10 +60,9 @@ public class DirectoryController {
   private final MetricRegistry metricRegistry    = SharedMetricRegistries.getOrCreate(Constants.METRICS_NAME);
   private final Histogram      contactsHistogram = metricRegistry.histogram(name(getClass(), "contacts"));
 
-  private final RateLimiters     rateLimiters;
-  private final DirectoryManager directory;
-
-  private final Optional<DirectoryCredentialsGenerator> userTokenGenerator;
+  private final RateLimiters                  rateLimiters;
+  private final DirectoryManager              directory;
+  private final DirectoryCredentialsGenerator userTokenGenerator;
 
   public DirectoryController(RateLimiters rateLimiters,
                              DirectoryManager directory,
@@ -73,10 +72,10 @@ public class DirectoryController {
     this.rateLimiters = rateLimiters;
 
     try {
-      this.userTokenGenerator = Optional.of(new DirectoryCredentialsGenerator(
+      this.userTokenGenerator = new DirectoryCredentialsGenerator(
               cdsConfig.getUserAuthenticationTokenSharedSecret(),
               cdsConfig.getUserAuthenticationTokenUserIdSecret()
-      ));
+      );
     } catch (DecoderException e) {
       throw new IllegalArgumentException(e);
     }
@@ -87,11 +86,7 @@ public class DirectoryController {
   @Path("/auth")
   @Produces(MediaType.APPLICATION_JSON)
   public Response getAuthToken(@Auth Account account) {
-    if (userTokenGenerator.isPresent()) {
-      return Response.ok().entity(userTokenGenerator.get().generateFor(account.getNumber())).build();
-    } else {
-      return Response.status(404).build();
-    }
+    return Response.ok().entity(userTokenGenerator.generateFor(account.getNumber())).build();
   }
 
   @Timed
