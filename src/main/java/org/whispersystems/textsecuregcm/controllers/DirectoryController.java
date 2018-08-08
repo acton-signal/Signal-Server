@@ -25,7 +25,7 @@ import org.apache.commons.codec.DecoderException;
 import org.hibernate.validator.constraints.NotEmpty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.whispersystems.textsecuregcm.auth.AuthorizationTokenGenerator;
+import org.whispersystems.textsecuregcm.auth.DirectoryCredentialsGenerator;
 import org.whispersystems.textsecuregcm.configuration.ContactDiscoveryConfiguration;
 import org.whispersystems.textsecuregcm.entities.ClientContact;
 import org.whispersystems.textsecuregcm.entities.ClientContactTokens;
@@ -63,7 +63,7 @@ public class DirectoryController {
   private final RateLimiters     rateLimiters;
   private final DirectoryManager directory;
 
-  private final Optional<AuthorizationTokenGenerator> userTokenGenerator;
+  private final Optional<DirectoryCredentialsGenerator> userTokenGenerator;
 
   public DirectoryController(RateLimiters rateLimiters,
                              DirectoryManager directory,
@@ -73,7 +73,7 @@ public class DirectoryController {
     this.rateLimiters = rateLimiters;
 
     try {
-      this.userTokenGenerator = Optional.of(new AuthorizationTokenGenerator(
+      this.userTokenGenerator = Optional.of(new DirectoryCredentialsGenerator(
               cdsConfig.getUserAuthenticationTokenSharedSecret(),
               Optional.of(cdsConfig.getUserAuthenticationTokenUserIdSecret())
       ));

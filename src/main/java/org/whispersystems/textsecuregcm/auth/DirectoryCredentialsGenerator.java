@@ -14,19 +14,19 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.TimeUnit;
 
-public class AuthorizationTokenGenerator {
+public class DirectoryCredentialsGenerator {
 
-  private final Logger logger = LoggerFactory.getLogger(AuthorizationTokenGenerator.class);
+  private final Logger logger = LoggerFactory.getLogger(DirectoryCredentialsGenerator.class);
 
   private final byte[]           key;
   private final Optional<byte[]> userIdKey;
 
-  public AuthorizationTokenGenerator(byte[] key, Optional<byte[]> userIdKey) {
+  public DirectoryCredentialsGenerator(byte[] key, Optional<byte[]> userIdKey) {
     this.key       = key;
     this.userIdKey = userIdKey;
   }
 
-  public AuthorizationToken generateFor(String number) {
+  public DirectoryCredentials generateFor(String number) {
     try {
       Mac    mac                = Mac.getInstance("HmacSHA256");
       String username           = getUserId(number);
@@ -37,7 +37,7 @@ public class AuthorizationTokenGenerator {
       String output = Hex.encodeHexString(Util.truncate(mac.doFinal(prefix.getBytes()), 10));
       String token  = prefix + ":" + output;
 
-      return new AuthorizationToken(username, token);
+      return new DirectoryCredentials(username, token);
     } catch (NoSuchAlgorithmException | InvalidKeyException e) {
       throw new AssertionError(e);
     }
@@ -100,7 +100,7 @@ public class AuthorizationTokenGenerator {
     } catch (NoSuchAlgorithmException | InvalidKeyException e) {
       throw new AssertionError(e);
     } catch (DecoderException e) {
-      logger.warn("Authorizationtoken", e);
+      logger.warn("DirectoryCredentials", e);
       return false;
     }
   }
