@@ -18,10 +18,10 @@ public class DirectoryCredentialsGenerator {
 
   private final Logger logger = LoggerFactory.getLogger(DirectoryCredentialsGenerator.class);
 
-  private final byte[]           key;
-  private final Optional<byte[]> userIdKey;
+  private final byte[] key;
+  private final byte[] userIdKey;
 
-  public DirectoryCredentialsGenerator(byte[] key, Optional<byte[]> userIdKey) {
+  public DirectoryCredentialsGenerator(byte[] key, byte[] userIdKey) {
     this.key       = key;
     this.userIdKey = userIdKey;
   }
@@ -63,16 +63,12 @@ public class DirectoryCredentialsGenerator {
   }
 
   private String getUserId(String number) {
-    if (userIdKey.isPresent()) {
-      try {
-        Mac mac = Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec(userIdKey.get(), "HmacSHA256"));
-        return Hex.encodeHexString(Util.truncate(mac.doFinal(number.getBytes()), 10));
-      } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-        throw new AssertionError(e);
-      }
-    } else {
-      return number;
+    try {
+      Mac mac = Mac.getInstance("HmacSHA256");
+      mac.init(new SecretKeySpec(userIdKey, "HmacSHA256"));
+      return Hex.encodeHexString(Util.truncate(mac.doFinal(number.getBytes()), 10));
+    } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+      throw new AssertionError(e);
     }
   }
 

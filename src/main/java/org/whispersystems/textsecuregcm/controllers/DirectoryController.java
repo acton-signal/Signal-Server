@@ -75,7 +75,7 @@ public class DirectoryController {
     try {
       this.userTokenGenerator = Optional.of(new DirectoryCredentialsGenerator(
               cdsConfig.getUserAuthenticationTokenSharedSecret(),
-              Optional.of(cdsConfig.getUserAuthenticationTokenUserIdSecret())
+              cdsConfig.getUserAuthenticationTokenUserIdSecret()
       ));
     } catch (DecoderException e) {
       throw new IllegalArgumentException(e);
