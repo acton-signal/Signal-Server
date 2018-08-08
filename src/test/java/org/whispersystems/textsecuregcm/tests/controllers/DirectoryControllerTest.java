@@ -8,7 +8,7 @@ import org.junit.Test;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 import org.whispersystems.dropwizard.simpleauth.AuthValueFactoryProvider;
-import org.whispersystems.textsecuregcm.auth.AuthorizationToken;
+import org.whispersystems.textsecuregcm.auth.DirectoryCredentials;
 import org.whispersystems.textsecuregcm.configuration.ContactDiscoveryConfiguration;
 import org.whispersystems.textsecuregcm.controllers.DirectoryController;
 import org.whispersystems.textsecuregcm.entities.ClientContactTokens;
@@ -75,12 +75,12 @@ public class DirectoryControllerTest {
 
   @Test
   public void testGetAuthToken() {
-    AuthorizationToken token =
+    DirectoryCredentials token =
             resources.getJerseyTest()
                      .target("/v1/directory/auth")
                      .request()
                      .header("Authorization", AuthHelper.getAuthHeader(AuthHelper.VALID_NUMBER, AuthHelper.VALID_PASSWORD))
-                     .get(AuthorizationToken.class);
+                     .get(DirectoryCredentials.class);
     assertThat(token.getUsername()).isNotEqualTo(AuthHelper.VALID_NUMBER);
     assertThat(token.getPassword()).startsWith(token.getUsername() + ":");
   }
