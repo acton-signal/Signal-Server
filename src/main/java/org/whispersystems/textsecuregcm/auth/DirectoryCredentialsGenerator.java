@@ -20,27 +20,37 @@ public class DirectoryCredentialsGenerator {
 
   private final byte[] key;
   private final byte[] userIdKey;
+  private final Mac    mac;
+
+  private byte[] getHmac(byte[] key, byte[] input) {
+    try {
+      synchronized (mac) {
+        mac.init(new SecretKeySpec(key, "HmacSHA256"));
+        return mac.doFinal(input);
+      }
+    } catch (InvalidKeyException e) {
+      throw new AssertionError(e);
+    }
+  }
 
   public DirectoryCredentialsGenerator(byte[] key, byte[] userIdKey) {
     this.key       = key;
     this.userIdKey = userIdKey;
+    try {
+      this.mac = Mac.getInstance("HmacSHA256");
+    } catch (NoSuchAlgorithmException e) {
+      throw new AssertionError(e);
+    }
   }
 
   public DirectoryCredentials generateFor(String number) {
-    try {
-      Mac    mac                = Mac.getInstance("HmacSHA256");
-      String username           = getUserId(number);
-      long   currentTimeSeconds = System.currentTimeMillis() / 1000;
-      String prefix             = username + ":"  + currentTimeSeconds;
+    String username           = getUserId(number);
+    long   currentTimeSeconds = System.currentTimeMillis() / 1000;
+    String prefix             = username + ":"  + currentTimeSeconds;
+    String output             = Hex.encodeHexString(Util.truncate(getHmac(key, prefix.getBytes()), 10));
+    String token              = prefix + ":" + output;
 
-      mac.init(new SecretKeySpec(key, "HmacSHA256"));
-      String output = Hex.encodeHexString(Util.truncate(mac.doFinal(prefix.getBytes()), 10));
-      String token  = prefix + ":" + output;
-
-      return new DirectoryCredentials(username, token);
-    } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-      throw new AssertionError(e);
-    }
+    return new DirectoryCredentials(username, token);
   }
 
 
@@ -63,13 +73,7 @@ public class DirectoryCredentialsGenerator {
   }
 
   private String getUserId(String number) {
-    try {
-      Mac mac = Mac.getInstance("HmacSHA256");
-      mac.init(new SecretKeySpec(userIdKey, "HmacSHA256"));
-      return Hex.encodeHexString(Util.truncate(mac.doFinal(number.getBytes()), 10));
-    } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-      throw new AssertionError(e);
-    }
+    return Hex.encodeHexString(Util.truncate(getHmac(userIdKey, number.getBytes()), 10));
   }
 
   private boolean isValidTime(String timeString, long currentTimeMillis) {
@@ -86,15 +90,10 @@ public class DirectoryCredentialsGenerator {
 
   private boolean isValidSignature(String prefix, String suffix) {
     try {
-      Mac hmac = Mac.getInstance("HmacSHA256");
-      hmac.init(new SecretKeySpec(key, "HmacSHA256"));
-
-      byte[] ourSuffix   = Util.truncate(hmac.doFinal(prefix.getBytes()), 10);
+      byte[] ourSuffix   = Util.truncate(getHmac(key, prefix.getBytes()), 10);
       byte[] theirSuffix = Hex.decodeHex(suffix.toCharArray());
 
       return MessageDigest.isEqual(ourSuffix, theirSuffix);
-    } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-      throw new AssertionError(e);
     } catch (DecoderException e) {
       logger.warn("DirectoryCredentials", e);
       return false;
