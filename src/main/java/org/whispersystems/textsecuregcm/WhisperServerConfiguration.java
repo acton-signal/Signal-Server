@@ -28,7 +28,7 @@ import org.whispersystems.textsecuregcm.configuration.RateLimitsConfiguration;
 import org.whispersystems.textsecuregcm.configuration.RedPhoneConfiguration;
 import org.whispersystems.textsecuregcm.configuration.RedisConfiguration;
 import org.whispersystems.textsecuregcm.configuration.AttachmentsConfiguration;
-import org.whispersystems.textsecuregcm.configuration.ContactDiscoveryConfiguration;
+import org.whispersystems.textsecuregcm.configuration.DirectoryConfiguration;
 import org.whispersystems.textsecuregcm.configuration.TestDeviceConfiguration;
 import org.whispersystems.textsecuregcm.configuration.TurnConfiguration;
 import org.whispersystems.textsecuregcm.configuration.TwilioConfiguration;
@@ -65,11 +65,6 @@ public class WhisperServerConfiguration extends Configuration {
   @NotNull
   @Valid
   @JsonProperty
-  private ContactDiscoveryConfiguration contactDiscovery;
-
-  @NotNull
-  @Valid
-  @JsonProperty
   private ProfilesConfiguration profiles;
 
   @NotNull
@@ -80,7 +75,7 @@ public class WhisperServerConfiguration extends Configuration {
   @NotNull
   @Valid
   @JsonProperty
-  private RedisConfiguration directory;
+  private DirectoryConfiguration directory;
 
   @NotNull
   @Valid
@@ -169,13 +164,11 @@ public class WhisperServerConfiguration extends Configuration {
     return attachments;
   }
 
-  public ContactDiscoveryConfiguration getContactDiscoveryConfiguration() { return contactDiscovery; }
-
   public RedisConfiguration getCacheConfiguration() {
     return cache;
   }
 
-  public RedisConfiguration getDirectoryConfiguration() {
+  public DirectoryConfiguration getDirectoryConfiguration() {
     return directory;
   }
 

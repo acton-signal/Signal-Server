@@ -26,7 +26,7 @@ import org.hibernate.validator.constraints.NotEmpty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.auth.DirectoryCredentialsGenerator;
-import org.whispersystems.textsecuregcm.configuration.ContactDiscoveryConfiguration;
+import org.whispersystems.textsecuregcm.configuration.DirectoryConfiguration;
 import org.whispersystems.textsecuregcm.entities.ClientContact;
 import org.whispersystems.textsecuregcm.entities.ClientContactTokens;
 import org.whispersystems.textsecuregcm.entities.ClientContacts;
@@ -66,15 +66,15 @@ public class DirectoryController {
 
   public DirectoryController(RateLimiters rateLimiters,
                              DirectoryManager directory,
-                             ContactDiscoveryConfiguration cdsConfig)
+                             DirectoryConfiguration directoryConfig)
   {
     this.directory    = directory;
     this.rateLimiters = rateLimiters;
 
     try {
       this.userTokenGenerator = new DirectoryCredentialsGenerator(
-              cdsConfig.getUserAuthenticationTokenSharedSecret(),
-              cdsConfig.getUserAuthenticationTokenUserIdSecret()
+              directoryConfig.getDirectoryClientConfiguration().getUserAuthenticationTokenSharedSecret(),
+              directoryConfig.getDirectoryClientConfiguration().getUserAuthenticationTokenUserIdSecret()
       );
     } catch (DecoderException e) {
       throw new IllegalArgumentException(e);

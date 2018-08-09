@@ -27,8 +27,8 @@ import org.glassfish.jersey.SslConfigurator;
 import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.whispersystems.textsecuregcm.configuration.ContactDiscoveryConfiguration;
 import org.whispersystems.textsecuregcm.configuration.DirectoryConfiguration;
+import org.whispersystems.textsecuregcm.configuration.DirectoryServerConfiguration;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
 import org.whispersystems.textsecuregcm.redis.LuaScript;
 import org.whispersystems.textsecuregcm.redis.ReplicatedJedisPool;
@@ -94,13 +94,13 @@ public class DirectoryReconciler implements Managed, Runnable {
   private boolean finished;
 
 
-  public DirectoryReconciler(ContactDiscoveryConfiguration cdsConfig,
+  public DirectoryReconciler(DirectoryConfiguration directoryConfig,
                              ReplicatedJedisPool jedisPool,
                              AccountsManager accountsManager)
       throws IOException
   {
-    DirectoryConfiguration directoryConfig = cdsConfig.getDirectoryConfiguration();
-    this.serverApiUrl    = directoryConfig.getServerApiUrl();
+    DirectoryServerConfiguration directoryServerConfig = directoryConfig.getDirectoryServerConfiguration();
+    this.serverApiUrl    = directoryServerConfig.getServerApiUrl();
     this.jedisPool       = jedisPool;
     this.accountsManager = accountsManager;
 
@@ -115,13 +115,13 @@ public class DirectoryReconciler implements Managed, Runnable {
     SslConfigurator sslConfig = SslConfigurator.newInstance()
                                                .securityProtocol("TLSv1.2");
     try {
-      sslConfig.trustStore(initializeKeyStore(directoryConfig.getServerApiCaCertificate()));
+      sslConfig.trustStore(initializeKeyStore(directoryServerConfig.getServerApiCaCertificate()));
     } catch (CertificateException ex) {
       logger.error("error reading serverApiCaCertificate from contactDiscovery config", ex);
     }
 
     this.client = ClientBuilder.newBuilder()
-                               .register(HttpAuthenticationFeature.basic("signal", directoryConfig.getServerApiToken().getBytes()))
+                               .register(HttpAuthenticationFeature.basic("signal", directoryServerConfig.getServerApiToken().getBytes()))
                                .sslContext(sslConfig.createSSLContext())
                                .build();
   }

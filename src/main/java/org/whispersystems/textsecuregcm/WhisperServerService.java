@@ -31,7 +31,7 @@ import org.whispersystems.dropwizard.simpleauth.BasicCredentialAuthFilter;
 import org.whispersystems.textsecuregcm.auth.AccountAuthenticator;
 import org.whispersystems.textsecuregcm.auth.FederatedPeerAuthenticator;
 import org.whispersystems.textsecuregcm.auth.TurnTokenGenerator;
-import org.whispersystems.textsecuregcm.configuration.ContactDiscoveryConfiguration;
+import org.whispersystems.textsecuregcm.configuration.DirectoryConfiguration;
 import org.whispersystems.textsecuregcm.controllers.AccountController;
 import org.whispersystems.textsecuregcm.controllers.AttachmentController;
 import org.whispersystems.textsecuregcm.controllers.DeviceController;
@@ -151,7 +151,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.getObjectMapper().setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.NONE);
     environment.getObjectMapper().setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY);
 
-    ContactDiscoveryConfiguration cdsConfig = config.getContactDiscoveryConfiguration();
+    DirectoryConfiguration directoryConfig = config.getDirectoryConfiguration();
 
     DBIFactory dbiFactory = new DBIFactory();
     DBI        database   = dbiFactory.build(environment, config.getDataSourceFactory(), "accountdb");
@@ -164,7 +164,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     Messages        messages        = messagedb.onDemand(Messages.class);
 
     RedisClientFactory cacheClientFactory         = new RedisClientFactory(config.getCacheConfiguration().getUrl(), config.getCacheConfiguration().getReplicaUrls()                                                              );
-    RedisClientFactory directoryClientFactory     = new RedisClientFactory(config.getDirectoryConfiguration().getUrl(), config.getDirectoryConfiguration().getReplicaUrls()                                                      );
+    RedisClientFactory directoryClientFactory     = new RedisClientFactory(directoryConfig.getRedisConfiguration().getUrl(), directoryConfig.getRedisConfiguration().getReplicaUrls()                                                      );
     RedisClientFactory messagesClientFactory      = new RedisClientFactory(config.getMessageCacheConfiguration().getRedisConfiguration().getUrl(), config.getMessageCacheConfiguration().getRedisConfiguration().getReplicaUrls());
     RedisClientFactory pushSchedulerClientFactory = new RedisClientFactory(config.getPushScheduler().getUrl(), config.getPushScheduler().getReplicaUrls()                                                                        );
 
@@ -198,8 +198,8 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     ReceiptSender            receiptSender       = new ReceiptSender(accountsManager, pushSender, federatedClientManager);
     TurnTokenGenerator       turnTokenGenerator  = new TurnTokenGenerator(config.getTurnConfiguration());
 
-    ContactDiscoveryQueueSender cdsSender           = new ContactDiscoveryQueueSender(cdsConfig);
-    DirectoryReconciler         directoryReconciler = new DirectoryReconciler(cdsConfig, cacheClient, accountsManager);
+    ContactDiscoveryQueueSender cdsSender           = new ContactDiscoveryQueueSender(directoryConfig);
+    DirectoryReconciler         directoryReconciler = new DirectoryReconciler(directoryConfig, cacheClient, accountsManager);
 
     messagesCache.setPubSubManager(pubSubManager, pushSender);
 
@@ -227,7 +227,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
 
     environment.jersey().register(new AccountController(pendingAccountsManager, accountsManager, rateLimiters, smsSender, cdsSender, messagesManager, turnTokenGenerator, config.getTestDevices()));
     environment.jersey().register(new DeviceController(pendingDevicesManager, accountsManager, messagesManager, cdsSender, rateLimiters, config.getMaxDevices()));
-    environment.jersey().register(new DirectoryController(rateLimiters, directory, cdsConfig));
+    environment.jersey().register(new DirectoryController(rateLimiters, directory, directoryConfig));
     environment.jersey().register(new FederationControllerV1(accountsManager, attachmentController, messageController));
     environment.jersey().register(new FederationControllerV2(accountsManager, attachmentController, messageController, keysController));
     environment.jersey().register(new ProvisioningController(rateLimiters, pushSender));

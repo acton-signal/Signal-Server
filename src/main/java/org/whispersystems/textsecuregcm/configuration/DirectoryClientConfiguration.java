@@ -17,46 +17,26 @@
 package org.whispersystems.textsecuregcm.configuration;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.commons.codec.DecoderException;
+import org.apache.commons.codec.binary.Hex;
+import org.hibernate.validator.constraints.NotEmpty;
 
-import javax.validation.Valid;
-import javax.validation.constraints.NotNull;
+public class DirectoryClientConfiguration {
 
-public class DirectoryConfiguration {
-
+  @NotEmpty
   @JsonProperty
-  @NotNull
-  @Valid
-  private RedisConfiguration redis;
-    
-  @JsonProperty
-  @NotNull
-  @Valid
-  private SqsConfiguration sqs;
-    
-  @JsonProperty
-  @NotNull
-  @Valid
-  private DirectoryClientConfiguration client;
+  private String userAuthenticationTokenSharedSecret;
 
+  @NotEmpty
   @JsonProperty
-  @NotNull
-  @Valid
-  private DirectoryServerConfiguration server;
+  private String userAuthenticationTokenUserIdSecret;
 
-  public RedisConfiguration getRedisConfiguration() {
-    return redis;
+  public byte[] getUserAuthenticationTokenSharedSecret() throws DecoderException {
+    return Hex.decodeHex(userAuthenticationTokenSharedSecret.toCharArray());
   }
 
-  public SqsConfiguration getSqsConfiguration() {
-    return sqs;
-  }
-
-  public DirectoryClientConfiguration getDirectoryClientConfiguration() {
-    return client;
-  }
-
-  public DirectoryServerConfiguration getDirectoryServerConfiguration() {
-    return server;
+  public byte[] getUserAuthenticationTokenUserIdSecret() throws DecoderException {
+    return Hex.decodeHex(userAuthenticationTokenUserIdSecret.toCharArray());
   }
 
 }
