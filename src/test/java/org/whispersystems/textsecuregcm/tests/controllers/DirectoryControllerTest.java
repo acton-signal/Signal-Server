@@ -9,7 +9,8 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 import org.whispersystems.dropwizard.simpleauth.AuthValueFactoryProvider;
 import org.whispersystems.textsecuregcm.auth.DirectoryCredentials;
-import org.whispersystems.textsecuregcm.configuration.ContactDiscoveryConfiguration;
+import org.whispersystems.textsecuregcm.configuration.DirectoryConfiguration;
+import org.whispersystems.textsecuregcm.configuration.DirectoryClientConfiguration;
 import org.whispersystems.textsecuregcm.controllers.DirectoryController;
 import org.whispersystems.textsecuregcm.entities.ClientContactTokens;
 import org.whispersystems.textsecuregcm.limits.RateLimiter;
@@ -37,12 +38,14 @@ public class DirectoryControllerTest {
   private final RateLimiter      rateLimiter      = mock(RateLimiter.class     );
   private final DirectoryManager directoryManager = mock(DirectoryManager.class);
 
-  private final ContactDiscoveryConfiguration cdsConfig = mock(ContactDiscoveryConfiguration.class);
+  private final DirectoryConfiguration directoryConfig             = mock(DirectoryConfiguration.class);
+  private final DirectoryClientConfiguration directoryClientConfig = mock(DirectoryClientConfiguration.class);
 
   {
     try {
-      when(cdsConfig.getUserAuthenticationTokenSharedSecret()).thenReturn(new byte[100]);
-      when(cdsConfig.getUserAuthenticationTokenUserIdSecret()).thenReturn(new byte[100]);
+      when(directoryConfig.getDirectoryClientConfiguration()).thenReturn(directoryClientConfig);
+      when(directoryClientConfig.getUserAuthenticationTokenSharedSecret()).thenReturn(new byte[100]);
+      when(directoryClientConfig.getUserAuthenticationTokenUserIdSecret()).thenReturn(new byte[100]);
     } catch (Exception e) {
       throw new AssertionError(e);
     }
@@ -55,7 +58,7 @@ public class DirectoryControllerTest {
                                                             .setTestContainerFactory(new GrizzlyWebTestContainerFactory())
                                                             .addResource(new DirectoryController(rateLimiters,
                                                                                                  directoryManager,
-                                                                                                 cdsConfig))
+                                                                                                 directoryConfig))
                                                             .build();
 
 
