@@ -32,14 +32,14 @@ directory:
   redis: # Redis server configuration for directory cluster
     url:
     replicaUrls:
-  directoryClient: # Configuration for interfacing with Contact Discovery Service cluster
+  client: # Configuration for interfacing with Contact Discovery Service cluster
     userAuthenticationTokenSharedSecret: # hex-encoded secret shared with CDS used to generate auth tokens for Signal users
     userAuthenticationTokenUserIdSecret: # hex-encoded secret shared among Signal-Servers to obscure user phone numbers from CDS
   sqs:
     accessKey:      # AWS SQS accessKey
     accessSecret:   # AWS SQS accessSecret
     queueUrl:       # AWS SQS queue url
-  directoryServer:
+  server:
     serverApiUrl:   # CDS server-api base url
     serverAptToken: # CDS server-api auth token
     serverApiCaCertificate: # CDS server-api TLS certificate trust root
