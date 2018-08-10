@@ -164,6 +164,7 @@ public class DirectoryReconciler implements Managed, Runnable {
       try {
         wait(delay - elapsed);
       } catch (InterruptedException ex) {
+        throw new AssertionError(e);
       }
       elapsed = System.currentTimeMillis() - start;
     }
