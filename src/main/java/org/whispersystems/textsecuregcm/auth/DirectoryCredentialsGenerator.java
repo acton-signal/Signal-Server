@@ -22,17 +22,6 @@ public class DirectoryCredentialsGenerator {
   private final byte[] userIdKey;
   private final Mac    mac;
 
-  private byte[] getHmac(byte[] key, byte[] input) {
-    try {
-      synchronized (mac) {
-        mac.init(new SecretKeySpec(key, "HmacSHA256"));
-        return mac.doFinal(input);
-      }
-    } catch (InvalidKeyException e) {
-      throw new AssertionError(e);
-    }
-  }
-
   public DirectoryCredentialsGenerator(byte[] key, byte[] userIdKey) {
     this.key       = key;
     this.userIdKey = userIdKey;
@@ -97,6 +86,17 @@ public class DirectoryCredentialsGenerator {
     } catch (DecoderException e) {
       logger.warn("DirectoryCredentials", e);
       return false;
+    }
+  }
+
+  private byte[] getHmac(byte[] key, byte[] input) {
+    try {
+      synchronized (mac) {
+        mac.init(new SecretKeySpec(key, "HmacSHA256"));
+        return mac.doFinal(input);
+      }
+    } catch (InvalidKeyException e) {
+      throw new AssertionError(e);
     }
   }
 
