@@ -92,28 +92,28 @@ public class DirectoryController {
   @Timed
   @PUT
   @Path("/feedback/ok")
-  public Response putFeedbackOk(@Auth Account account) {
+  public Response setFeedbackOk(@Auth Account account) {
     return Response.ok().build();
   }
 
   @Timed
   @PUT
   @Path("/feedback/mismatch")
-  public Response putFeedbackMismatch(@Auth Account account) {
+  public Response setFeedbackMismatch(@Auth Account account) {
     return Response.ok().build();
   }
 
   @Timed
   @PUT
   @Path("/feedback/attestation-error")
-  public Response putFeedbackAttestationError(@Auth Account account) {
+  public Response setFeedbackAttestationError(@Auth Account account) {
     return Response.ok().build();
   }
 
   @Timed
   @PUT
   @Path("/feedback/unexpected-error")
-  public Response putFeedbackUnexpectedError(@Auth Account account) {
+  public Response setFeedbackUnexpectedError(@Auth Account account) {
     return Response.ok().build();
   }
 
