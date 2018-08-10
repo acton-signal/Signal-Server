@@ -138,7 +138,7 @@ public class DirectoryReconciler implements Managed, Runnable {
       keyStore.setCertificateEntry("ca", certificate);
       return keyStore;
     } catch (IOException | KeyStoreException ex) {
-      throw new CertificateException(ex.toString());
+      throw new CertificateException(ex);
     } catch (NoSuchAlgorithmException ex) {
       throw new AssertionError(ex);
     }
