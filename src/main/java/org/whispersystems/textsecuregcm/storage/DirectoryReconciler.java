@@ -97,7 +97,7 @@ public class DirectoryReconciler implements Managed, Runnable {
   public DirectoryReconciler(DirectoryConfiguration directoryConfig,
                              ReplicatedJedisPool jedisPool,
                              AccountsManager accountsManager)
-      throws IOException
+      throws IOException, CertificateException
   {
     DirectoryServerConfiguration directoryServerConfig = directoryConfig.getDirectoryServerConfiguration();
     this.serverApiUrl    = directoryServerConfig.getServerApiUrl();
@@ -114,11 +114,7 @@ public class DirectoryReconciler implements Managed, Runnable {
 
     SslConfigurator sslConfig = SslConfigurator.newInstance()
                                                .securityProtocol("TLSv1.2");
-    try {
-      sslConfig.trustStore(initializeKeyStore(directoryServerConfig.getServerApiCaCertificate()));
-    } catch (CertificateException ex) {
-      logger.error("error reading serverApiCaCertificate from contactDiscovery config", ex);
-    }
+    sslConfig.trustStore(initializeKeyStore(directoryServerConfig.getServerApiCaCertificate()));
 
     this.client = ClientBuilder.newBuilder()
                                .register(HttpAuthenticationFeature.basic("signal", directoryServerConfig.getServerApiToken().getBytes()))
