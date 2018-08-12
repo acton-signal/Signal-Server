@@ -201,7 +201,6 @@ public class DirectoryReconcilerTest {
     verify(reconciliationCache, times(1)).getWorkerCount(anyLong());
     verify(reconciliationCache, times(1)).setLastNumber(eq(Optional.absent()));
     verify(reconciliationCache, times(1)).clearAccelerate();
-    verify(reconciliationCache, times(1)).isAccelerated();
     verify(reconciliationCache, times(1)).lockActiveWorker(any(), anyLong());
     verify(reconciliationCache, times(1)).unlockActiveWorker(any());
 

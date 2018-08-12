@@ -124,8 +124,9 @@ public class DirectoryReconciler implements Managed, Runnable {
     try {
       if (reconciliationCache.lockActiveWorker(workerId, CHUNK_INTERVAL)) {
         try {
-          processChunk();
-          accelerate = reconciliationCache.isAccelerated();
+          if (processChunk()) {
+            accelerate = reconciliationCache.isAccelerated();
+          }
         } finally {
           reconciliationCache.unlockActiveWorker(workerId);
         }
@@ -154,14 +155,14 @@ public class DirectoryReconciler implements Managed, Runnable {
     }
   }
 
-  private void processChunk() {
+  private boolean processChunk() {
     Optional<String>               fromNumber          = reconciliationCache.getLastNumber();
     int                            chunkSize           = (int) (Math.max(getAccountCount(), 1L) * PERIOD / CHUNK_INTERVAL);
     DirectoryReconciliationRequest request             = readChunk(fromNumber, chunkSize);
     Response                       sendChunkResponse   = sendChunk(fromNumber, request);
     boolean                        sendChunkSuccessful = sendChunkResponse.getStatusInfo().getFamily() == Response.Status.Family.SUCCESSFUL;
 
-    if (!sendChunkSuccessful || request.getToNumber() == null) {
+    if (sendChunkResponse.getStatus() == 404 || request.getToNumber() == null) {
       reconciliationCache.clearAccelerate();
     }
 
@@ -170,6 +171,8 @@ public class DirectoryReconciler implements Managed, Runnable {
     } else if (sendChunkResponse.getStatus() == 404) {
       reconciliationCache.setLastNumber(Optional.absent());
     }
+
+    return sendChunkSuccessful;
   }
 
   private DirectoryReconciliationRequest readChunk(Optional<String> fromNumber, int chunkSize) {
