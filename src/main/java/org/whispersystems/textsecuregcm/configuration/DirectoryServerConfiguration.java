@@ -23,25 +23,25 @@ public class DirectoryServerConfiguration {
 
   @NotEmpty
   @JsonProperty
-  private String serverApiUrl;
+  private String replicationUrl;
 
   @NotEmpty
   @JsonProperty
-  private String serverApiToken;
+  private String replicationPassword;
 
   @NotEmpty
   @JsonProperty
-  private String serverApiCaCertificate;
+  private String replicationCaCertificate;
 
-  public String getServerApiUrl() {
-    return serverApiUrl;
+  public String getReplicationUrl() {
+    return replicationUrl;
   }
 
-  public String getServerApiToken() {
-    return serverApiToken;
+  public String getReplicationPassword() {
+    return replicationPassword;
   }
 
-  public String getServerApiCaCertificate() {
-    return serverApiCaCertificate;
+  public String getReplicationCaCertificate() {
+    return replicationCaCertificate;
   }
 }

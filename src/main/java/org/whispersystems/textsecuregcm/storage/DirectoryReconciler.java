@@ -27,14 +27,12 @@ import org.glassfish.jersey.SslConfigurator;
 import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.whispersystems.textsecuregcm.configuration.DirectoryConfiguration;
 import org.whispersystems.textsecuregcm.configuration.DirectoryServerConfiguration;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
 import org.whispersystems.textsecuregcm.redis.LuaScript;
 import org.whispersystems.textsecuregcm.redis.ReplicatedJedisPool;
 import org.whispersystems.textsecuregcm.util.Constants;
 import org.whispersystems.textsecuregcm.util.Hex;
-import org.whispersystems.textsecuregcm.util.Util;
 import redis.clients.jedis.Jedis;
 
 import javax.ws.rs.ProcessingException;
@@ -54,7 +52,9 @@ import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Random;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import static com.codahale.metrics.MetricRegistry.name;
 
@@ -67,7 +67,7 @@ public class DirectoryReconciler implements Managed, Runnable {
   private static final Timer          sendChunkTimer      = metricRegistry.timer(name(DirectoryReconciler.class, "sendChunk"));
   private static final Meter          sendChunkErrorMeter = metricRegistry.meter(name(DirectoryReconciler.class, "sendChunkError"));
 
-  private static final String WORKERS_KEY       = "directory_reconciliation_workers";
+  private static final String WORKER_SET_KEY    = "directory_reconciliation_workers";
   private static final String ACTIVE_WORKER_KEY = "directory_reconciliation_active_worker";
   private static final String LAST_NUMBER_KEY   = "directory_reconciliation_last_number";
   private static final String CACHED_COUNT_KEY  = "directory_reconciliation_cached_count";
@@ -80,53 +80,53 @@ public class DirectoryReconciler implements Managed, Runnable {
   private static final long   ACCELERATE_CHUNK_INTERVAL = 500L;
   private static final double JITTER_MAX                = 0.20;
 
-  private final String              serverApiUrl;
+  private final String              replicationUrl;
   private final ReplicatedJedisPool jedisPool;
   private final AccountsManager     accountsManager;
   private final Client              client;
+  private final String              workerId;
+  private final SecureRandom        random;
+  private final UnlockOperation     unlockOperation;
 
-  private final String       workerId;
-  private final SecureRandom random;
+  private ScheduledExecutorService executor;
 
-  private final UnlockOperation unlockOperation;
-
-  private boolean running;
-  private boolean finished;
-
-
-  public DirectoryReconciler(DirectoryConfiguration directoryConfig,
+  public DirectoryReconciler(DirectoryServerConfiguration directoryServerConfiguration,
                              ReplicatedJedisPool jedisPool,
                              AccountsManager accountsManager)
       throws IOException, CertificateException
   {
-    DirectoryServerConfiguration directoryServerConfig = directoryConfig.getDirectoryServerConfiguration();
-    this.serverApiUrl    = directoryServerConfig.getServerApiUrl();
-    this.jedisPool       = jedisPool;
-    this.accountsManager = accountsManager;
-
-    this.random = new SecureRandom();
-
-    byte[] workerIdBytes = new byte[16];
-    random.nextBytes(workerIdBytes);
-    this.workerId = Hex.toString(workerIdBytes);
-
-    this.unlockOperation = new UnlockOperation(jedisPool);
-
-    SslConfigurator sslConfig = SslConfigurator.newInstance()
-                                               .securityProtocol("TLSv1.2");
-    sslConfig.trustStore(initializeKeyStore(directoryServerConfig.getServerApiCaCertificate()));
-
-    this.client = ClientBuilder.newBuilder()
-                               .register(HttpAuthenticationFeature.basic("signal", directoryServerConfig.getServerApiToken().getBytes()))
-                               .sslContext(sslConfig.createSSLContext())
-                               .build();
+    this.replicationUrl              = directoryServerConfiguration.getReplicationUrl();
+    this.jedisPool                   = jedisPool;
+    this.accountsManager             = accountsManager;
+    this.client                      = initializeClient(directoryServerConfiguration);
+    this.random                      = new SecureRandom();
+    this.workerId                    = generateWorkerId(random);
+    this.unlockOperation             = new UnlockOperation(jedisPool);
   }
 
-  private static KeyStore initializeKeyStore(String pemCaCertificate)
-          throws CertificateException
+  private static String generateWorkerId(SecureRandom random) {
+    byte[] workerIdBytes = new byte[16];
+    random.nextBytes(workerIdBytes);
+    return Hex.toString(workerIdBytes);
+  }
+
+  private static Client initializeClient(DirectoryServerConfiguration directoryServerConfiguration)
+      throws CertificateException
+  {
+    SslConfigurator sslConfig = SslConfigurator.newInstance()
+                                               .securityProtocol("TLSv1.2");
+    sslConfig.trustStore(initializeKeyStore(directoryServerConfiguration.getReplicationCaCertificate()));
+    return ClientBuilder.newBuilder()
+                        .register(HttpAuthenticationFeature.basic("signal", directoryServerConfiguration.getReplicationPassword().getBytes()))
+                        .sslContext(sslConfig.createSSLContext())
+                        .build();
+  }
+
+  private static KeyStore initializeKeyStore(String caCertificatePem)
+      throws CertificateException
   {
     try {
-      PEMReader       reader      = new PEMReader(new InputStreamReader(new ByteArrayInputStream(pemCaCertificate.getBytes())));
+      PEMReader       reader      = new PEMReader(new InputStreamReader(new ByteArrayInputStream(caCertificatePem.getBytes())));
       X509Certificate certificate = (X509Certificate) reader.readObject();
 
       if (certificate == null) {
@@ -145,43 +145,101 @@ public class DirectoryReconciler implements Managed, Runnable {
   }
 
   @Override
-  public synchronized void start() throws Exception {
-    running  = true;
-    finished = false;
-    new Thread(this).start();
+  public void start() {
+    this.executor = Executors.newSingleThreadScheduledExecutor();
+
+    try (Jedis jedis = jedisPool.getWriteResource()) {
+      cleanUpWorkerSet(jedis);
+    }
+
+    this.executor.scheduleWithFixedDelay(new PingTask(jedisPool, workerId), 0, WORKER_TTL_MS / 2, TimeUnit.MILLISECONDS);
+    this.executor.submit(this);
   }
 
   @Override
-  public synchronized void stop() throws Exception {
-    running = false;
-    while (!finished) Util.wait(this);
-  }
+  public void stop() {
+    this.executor.shutdown();
 
-  private synchronized boolean sleepWhileRunning(long delay) {
-    long start   = System.currentTimeMillis();
-    long elapsed = 0;
-    while (running && elapsed < delay) {
-      try {
-        wait(delay - elapsed);
-      } catch (InterruptedException ex) {
-        throw new AssertionError(e);
-      }
-      elapsed = System.currentTimeMillis() - start;
+    try (Jedis jedis = jedisPool.getWriteResource()) {
+      leaveWorkerSet(jedis, workerId);
     }
-    return running;
+
+    try {
+      this.executor.awaitTermination(5000, TimeUnit.MILLISECONDS);
+    } catch (InterruptedException ex) {
+      throw new AssertionError(ex);
+    }
   }
 
-  private List<String> readChunk(Optional<String> from, int chunkSize) {
+  @Override
+  public void run() {
+    boolean accelerate  = false;
+    long    workerCount = 1;
+
+    try (Jedis jedis = jedisPool.getWriteResource()) {
+      if (lockActiveWorker(jedis, workerId)) {
+        try {
+          processChunk(jedis);
+          accelerate = isAccelerated(jedis);
+        } finally {
+          unlockActiveWorker(unlockOperation, workerId);
+        }
+      }
+
+      if (!accelerate) {
+        workerCount = Math.max(getWorkerCount(jedis), 1);
+      }
+    } catch (Exception ex) {
+      logger.warn("error in directory reconciliation", ex);
+    }
+
+    if (!accelerate) {
+      scheduleWithJitter(CHUNK_INTERVAL * workerCount);
+    } else {
+      scheduleWithJitter(ACCELERATE_CHUNK_INTERVAL);
+    }
+  }
+
+  private void scheduleWithJitter(long delayMs) {
+    long randomJitterMs = (long) (random.nextDouble() * JITTER_MAX * delayMs);
+    executor.schedule(this, delayMs + randomJitterMs, TimeUnit.MILLISECONDS);
+  }
+
+  private void processChunk(Jedis jedis) {
+    Optional<String> fromNumber = getLastNumber(jedis);
+    int              chunkSize  = (int) (getAccountCount(jedis) * PERIOD / CHUNK_INTERVAL);
+    List<String>     numbers    = readChunk(fromNumber, chunkSize);
+
+    Optional<String> toNumber = Optional.absent();
+    if (!numbers.isEmpty()) {
+      toNumber = Optional.of(numbers.get(numbers.size() - 1));
+    }
+
+    Response sendChunkResponse   = sendChunk(fromNumber, numbers);
+    boolean  sendChunkSuccessful = sendChunkResponse.getStatusInfo().getFamily() == Response.Status.Family.SUCCESSFUL;
+
+    if (!sendChunkSuccessful || !toNumber.isPresent()) {
+      clearAccelerate(jedis);
+    }
+
+    if (sendChunkSuccessful) {
+      setLastNumber(jedis, toNumber);
+    } else if (sendChunkResponse.getStatus() == 404) {
+      setLastNumber(jedis, Optional.absent());
+    }
+  }
+
+  private List<String> readChunk(Optional<String> fromNumber, int chunkSize) {
     try (Timer.Context timer = readChunkTimer.time()) {
-      if (from.isPresent()) {
-        return accountsManager.getAllNumbers(from.get(), chunkSize);
+      if (fromNumber.isPresent()) {
+        return accountsManager.getAllNumbers(fromNumber.get(), chunkSize);
       } else {
         return accountsManager.getAllNumbers(chunkSize);
       }
     }
   }
 
-  private Optional<Response> sendChunk(Optional<String> fromNumber, List<String> numbers) {
+  private Response sendChunk(Optional<String> fromNumber, List<String> numbers) {
     String reconcilePath;
     if (fromNumber.isPresent()) {
       reconcilePath = String.format("/v1/directory/reconcile/%s", fromNumber);
@@ -190,135 +248,124 @@ public class DirectoryReconciler implements Managed, Runnable {
     }
 
     try (Timer.Context timer = sendChunkTimer.time()) {
-      Response response = client.target(serverApiUrl)
+      Response response = client.target(replicationUrl)
                                 .path(reconcilePath)
                                 .request(MediaType.APPLICATION_JSON)
                                 .put(Entity.json(new DirectoryReconciliationRequest(numbers)));
-      if (response.getStatus() != 200) {
+      if (response.getStatusInfo().getFamily() != Response.Status.Family.SUCCESSFUL) {
         sendChunkErrorMeter.mark();
         logger.warn("http error " + response.getStatus());
       }
-      return Optional.of(response);
+      return response;
     } catch (ProcessingException ex) {
       sendChunkErrorMeter.mark();
       logger.warn("request error: ", ex);
-      return Optional.absent();
+      throw ex;
     }
   }
 
-  private void processChunk(Jedis jedis) {
-    Optional<String> fromNumber     = Optional.fromNullable(jedis.get(LAST_NUMBER_KEY));
-    Optional<String> cachedCountStr = Optional.fromNullable(jedis.get(CACHED_COUNT_KEY));
-    Optional<Long>   cachedCount    = Optional.absent();
-    if (cachedCountStr.isPresent()) {
-      cachedCount = tryParseLong(cachedCountStr.get());
-    }
-
-    if (!cachedCount.isPresent()) {
-      cachedCount = Optional.of(accountsManager.getCount());
-      jedis.psetex(CACHED_COUNT_KEY, CACHED_COUNT_TTL_MS, Long.toString(cachedCount.get()));
-    }
-
-    int          chunkSize = (int) (cachedCount.get() * PERIOD / CHUNK_INTERVAL);
-    List<String> numbers   = readChunk(fromNumber, chunkSize);
-
-    Optional<String> toNumber = Optional.absent();
-    if (!numbers.isEmpty()) {
-      toNumber = Optional.of(numbers.get(numbers.size() - 1));
-    }
-
-    Optional<Response> sendChunkResp = sendChunk(fromNumber, numbers);
-    if (sendChunkResp.isPresent()) {
-      if (sendChunkResp.get().getStatus() == 200) {
-        if (toNumber.isPresent()) {
-          jedis.set(LAST_NUMBER_KEY, toNumber.get());
-        } else {
-          jedis.del(ACCELERATE_KEY);
-          jedis.del(LAST_NUMBER_KEY);
-        }
-      } else {
-        jedis.del(ACCELERATE_KEY);
-        if (sendChunkResp.get().getStatus() == 404) {
-          jedis.del(LAST_NUMBER_KEY);
-        }
-      }
-    }
-  }
-
-  @Override
-  public void run() {
-    logger.info("Directory reconciliation worker " + workerId + " started");
-
-    try (Jedis jedis = jedisPool.getWriteResource()) {
+  private static void cleanUpWorkerSet(Jedis jedis) {
+    try {
       long nowMs = System.currentTimeMillis();
-      jedis.zremrangeByScore(WORKERS_KEY, Double.NEGATIVE_INFINITY, (double) (nowMs - WORKER_TTL_MS));
+      jedis.zremrangeByScore(WORKER_SET_KEY, Double.NEGATIVE_INFINITY, (double) (nowMs - WORKER_TTL_MS));
     } catch (Exception ex) {
       logger.warn("failed to clean up worker set", ex);
     }
+  }
 
-    long workIntervalMs = CHUNK_INTERVAL;
-    long lastWorkTimeMs = 0;
-    long lastPingTimeMs = 0;
-    long randomJitterMs = 0;
-    while (sleepWhileRunning(Math.min(lastWorkTimeMs + workIntervalMs + randomJitterMs,
-                                      lastPingTimeMs + WORKER_TTL_MS / 2) - System.currentTimeMillis())) {
-      long nowMs = System.currentTimeMillis();
+  private static void joinWorkerSet(Jedis jedis, String workerId) {
+    long nowMs = System.currentTimeMillis();
+    jedis.zadd(WORKER_SET_KEY, (double) nowMs, workerId);
+  }
 
-      lastPingTimeMs = nowMs;
-
-      try (Jedis jedis = jedisPool.getWriteResource()) {
-        jedis.zadd(WORKERS_KEY, (double) nowMs, workerId);
-
-        if (nowMs - lastWorkTimeMs > workIntervalMs + randomJitterMs) {
-          lastWorkTimeMs = nowMs;
-
-          boolean accelerate = false;
-          if ("OK".equals(jedis.set(ACTIVE_WORKER_KEY, workerId, "NX", "PX", CHUNK_INTERVAL))) {
-            try {
-              processChunk(jedis);
-              accelerate = "1".equals(jedis.get(ACCELERATE_KEY));
-            } finally {
-              unlockOperation.unlock(ACTIVE_WORKER_KEY, workerId);
-            }
-          }
-
-          if (!accelerate) {
-            long workerCount = jedis.zcount(WORKERS_KEY, (double) (nowMs - WORKER_TTL_MS), Double.POSITIVE_INFINITY);
-
-            workIntervalMs = CHUNK_INTERVAL * workerCount;
-            randomJitterMs = (long) (random.nextDouble() * JITTER_MAX * workIntervalMs);
-          } else {
-            workIntervalMs = ACCELERATE_CHUNK_INTERVAL;
-            randomJitterMs = 0;
-          }
-        } else if (lastWorkTimeMs > nowMs) {
-          lastWorkTimeMs = nowMs;
-        }
-      } catch (Exception ex) {
-        logger.warn("error in directory reconciliation", ex);
-        lastWorkTimeMs = nowMs;
-      }
-    }
-
-    try (Jedis jedis = jedisPool.getWriteResource()) {
-      jedis.zrem(WORKERS_KEY, workerId);
+  private static void leaveWorkerSet(Jedis jedis, String workerId) {
+    try {
+      jedis.zrem(WORKER_SET_KEY, workerId);
     } catch (Exception ex) {
       logger.warn("failed to remove from worker set", ex);
     }
+  }
 
-    logger.info("Directory reconciliation worker " + workerId + " shut down");
+  private static long getWorkerCount(Jedis jedis) {
+    long nowMs = System.currentTimeMillis();
+    return jedis.zcount(WORKER_SET_KEY, (double) (nowMs - WORKER_TTL_MS), Double.POSITIVE_INFINITY);
+  }
 
-    synchronized (this) {
-      finished = true;
-      notifyAll();
+  private static void clearAccelerate(Jedis jedis) {
+    jedis.del(ACCELERATE_KEY);
+  }
+
+  private static boolean isAccelerated(Jedis jedis) {
+    return "1".equals(jedis.get(ACCELERATE_KEY));
+  }
+
+  private static boolean lockActiveWorker(Jedis jedis, String workerId) {
+    return "OK".equals(jedis.set(ACTIVE_WORKER_KEY, workerId, "NX", "PX", CHUNK_INTERVAL));
+  }
+
+  private static void unlockActiveWorker(UnlockOperation unlockOperation, String workerId) {
+    unlockOperation.unlock(ACTIVE_WORKER_KEY, workerId);
+  }
+
+  private static Optional<String> getLastNumber(Jedis jedis) {
+    return Optional.fromNullable(jedis.get(LAST_NUMBER_KEY));
+  }
+
+  private static void setLastNumber(Jedis jedis, Optional<String> lastNumber) {
+    if (lastNumber.isPresent()) {
+      jedis.set(LAST_NUMBER_KEY, lastNumber.get());
+    } else {
+      jedis.del(LAST_NUMBER_KEY);
     }
   }
 
-  public static Optional<Long> tryParseLong(String str) {
+
+  private long getAccountCount(Jedis jedis) {
+    Optional<Long> cachedCount = getCachedAccountCount(jedis);
+
+    if (cachedCount.isPresent()) {
+      return cachedCount.get();
+    }
+
+    long count = accountsManager.getCount();
+    setCachedAccountCount(jedis, count);
+    return count;
+  }
+
+  private static Optional<Long> getCachedAccountCount(Jedis jedis) {
+    Optional<String> cachedAccountCount = Optional.fromNullable(jedis.get(CACHED_COUNT_KEY));
+    if (!cachedAccountCount.isPresent()) {
+      return Optional.absent();
+    }
+
     try {
-      return Optional.of(Long.getLong(str));
+      return Optional.of(Long.parseLong(cachedAccountCount.get()));
     } catch (NumberFormatException ex) {
       return Optional.absent();
+    }
+  }
+
+  private static void setCachedAccountCount(Jedis jedis, long accountCount) {
+    jedis.psetex(CACHED_COUNT_KEY, CACHED_COUNT_TTL_MS, Long.toString(accountCount));
+  }
+
+  private static class PingTask implements Runnable {
+
+    private final String              workerId;
+    private final ReplicatedJedisPool jedisPool;
+
+    PingTask(ReplicatedJedisPool jedisPool, String workerId) {
+      this.jedisPool = jedisPool;
+      this.workerId  = workerId;
+    }
+
+    @Override
+    public void run() {
+      try (Jedis jedis = jedisPool.getWriteResource()) {
+        joinWorkerSet(jedis, workerId);
+      } catch (Exception ex) {
+        logger.warn("error joining worker set: ", ex);
+      }
     }
   }
 

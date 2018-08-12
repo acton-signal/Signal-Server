@@ -51,8 +51,7 @@ public class ContactDiscoveryQueueSender {
   private final String         queueUrl;
   private final AmazonSQS      sqs;
 
-  public ContactDiscoveryQueueSender(DirectoryConfiguration config) {
-    final SqsConfiguration             sqsConfig           = config.getSqsConfiguration();
+  public ContactDiscoveryQueueSender(SqsConfiguration sqsConfig) {
     final AWSCredentials               credentials         = new BasicAWSCredentials(sqsConfig.getAccessKey(), sqsConfig.getAccessSecret());
     final AWSStaticCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(credentials);
     

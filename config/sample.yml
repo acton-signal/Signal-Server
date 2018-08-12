@@ -40,9 +40,9 @@ directory:
     accessSecret:   # AWS SQS accessSecret
     queueUrl:       # AWS SQS queue url
   server:
-    serverApiUrl:   # CDS server-api base url
-    serverAptToken: # CDS server-api auth token
-    serverApiCaCertificate: # CDS server-api TLS certificate trust root
+    replicationUrl:           # CDS replication endpoint base url
+    replicationPassword:      # CDS replication endpoint password
+    replicationCaCertificate: # CDS replication endpoint TLS certificate trust root
 
 
 messageCache: # Redis server configuration for message store cache
