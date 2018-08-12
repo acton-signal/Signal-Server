@@ -61,12 +61,8 @@ public class AccountsManager {
     return accounts.getAll();
   }
 
-  public List<String> getAllNumbers(int length) {
-    return accounts.getAllNumbers(length);
-  }
-
-  public List<String> getAllNumbers(String from, int length) {
-    return accounts.getAllNumbers(from, length);
+  public List<Account> getAllFrom(String from, int length) {
+    return accounts.getAllFrom(from, length);
   }
 
   public boolean create(Account account) {

@@ -3,6 +3,7 @@ package org.whispersystems.textsecuregcm.tests.storage;
 import com.google.common.base.Optional;
 import org.junit.Before;
 import org.junit.Test;
+import org.whispersystems.textsecuregcm.storage.Account;
 import org.whispersystems.textsecuregcm.storage.AccountsManager;
 import org.whispersystems.textsecuregcm.storage.DirectoryReconciler;
 import org.whispersystems.textsecuregcm.storage.DirectoryReconciliationCache;
@@ -26,14 +27,15 @@ import static org.mockito.Mockito.when;
 
 public class DirectoryReconcilerTest {
 
-  private static final String VALID_FROM_NUMBER     = "valid";
-  private static final String NOT_FOUND_FROM_NUMBER = "not_found";
+  private static final String VALID_NUMBER = "valid";
 
   private static final long ACCOUNT_COUNT = 0L;
 
+  private final Account                       account                       = mock(Account.class);
   private final AccountsManager               accountsManager               = mock(AccountsManager.class);
   private final AccountsManager               notFoundAccountsManager       = mock(AccountsManager.class);
   private final DirectoryReconciliationClient reconciliationClient          = mock(DirectoryReconciliationClient.class);
+  private final DirectoryReconciliationClient notFoundReconciliationClient  = mock(DirectoryReconciliationClient.class);
   private final DirectoryReconciliationCache  reconciliationCache           = mock(DirectoryReconciliationCache.class);
   private final DirectoryReconciliationCache  inProgressReconciliationCache = mock(DirectoryReconciliationCache.class);
 
@@ -42,16 +44,17 @@ public class DirectoryReconcilerTest {
 
   @Before
   public void setup() {
-    when(accountsManager.getAllNumbers(anyInt())).thenReturn(Arrays.asList(VALID_FROM_NUMBER));
-    when(accountsManager.getAllNumbers(eq(VALID_FROM_NUMBER), anyInt())).thenReturn(Collections.emptyList());
+    when(account.getNumber()).thenReturn(VALID_NUMBER);
+    when(accountsManager.getAll(eq(0), anyInt())).thenReturn(Arrays.asList(account));
+    when(accountsManager.getAllFrom(eq(VALID_NUMBER), anyInt())).thenReturn(Collections.emptyList());
     when(accountsManager.getCount()).thenReturn(ACCOUNT_COUNT);
 
-    when(notFoundAccountsManager.getAllNumbers(anyInt())).thenReturn(Arrays.asList(NOT_FOUND_FROM_NUMBER));
+    when(notFoundAccountsManager.getAll(eq(0), anyInt())).thenReturn(Arrays.asList(account));
     when(notFoundAccountsManager.getCount()).thenReturn(ACCOUNT_COUNT);
 
-    when(reconciliationClient.sendChunk(any(), eq(Arrays.asList(VALID_FROM_NUMBER)))).thenReturn(successResponse);
-    when(reconciliationClient.sendChunk(any(), eq(Arrays.asList(NOT_FOUND_FROM_NUMBER)))).thenReturn(notFoundResponse);
-    when(reconciliationClient.sendChunk(any(), eq(Collections.emptyList()))).thenReturn(successResponse);
+    when(reconciliationClient.sendChunk(any(), any())).thenReturn(successResponse);
+
+    when(notFoundReconciliationClient.sendChunk(any(), any())).thenReturn(notFoundResponse);
 
     when(reconciliationCache.getCachedAccountCount()).thenReturn(Optional.absent());
     when(reconciliationCache.getLastNumber()).thenReturn(Optional.absent());
@@ -60,7 +63,7 @@ public class DirectoryReconcilerTest {
     when(reconciliationCache.getWorkerCount(anyLong())).thenReturn(0L);
 
     when(inProgressReconciliationCache.getCachedAccountCount()).thenReturn(Optional.of(ACCOUNT_COUNT));
-    when(inProgressReconciliationCache.getLastNumber()).thenReturn(Optional.of(VALID_FROM_NUMBER));
+    when(inProgressReconciliationCache.getLastNumber()).thenReturn(Optional.of(VALID_NUMBER));
     when(inProgressReconciliationCache.lockActiveWorker(any(), anyLong())).thenReturn(true);
     when(inProgressReconciliationCache.isAccelerated()).thenReturn(false);
     when(inProgressReconciliationCache.getWorkerCount(anyLong())).thenReturn(1L);
@@ -85,10 +88,10 @@ public class DirectoryReconcilerTest {
     directoryReconciler.start(new SynchronousExecutorService());
     directoryReconciler.stop();
 
-    verify(accountsManager, times(1)).getAllNumbers(anyInt());
+    verify(accountsManager, times(1)).getAll(eq(0), anyInt());
     verify(accountsManager, times(1)).getCount();
 
-    verify(reconciliationClient, times(1)).sendChunk(eq(Optional.absent()), eq(Arrays.asList(VALID_FROM_NUMBER)));
+    verify(reconciliationClient, times(1)).sendChunk(eq(Optional.absent()), any());
 
     verify(reconciliationCache, times(1)).cleanUpWorkerSet(anyLong());
     verify(reconciliationCache, times(1)).joinWorkerSet(any());
@@ -97,7 +100,7 @@ public class DirectoryReconcilerTest {
     verify(reconciliationCache, times(1)).setCachedAccountCount(eq(ACCOUNT_COUNT));
     verify(reconciliationCache, times(1)).getLastNumber();
     verify(reconciliationCache, times(1)).getWorkerCount(anyLong());
-    verify(reconciliationCache, times(1)).setLastNumber(eq(Optional.of(VALID_FROM_NUMBER)));
+    verify(reconciliationCache, times(1)).setLastNumber(eq(Optional.of(VALID_NUMBER)));
     verify(reconciliationCache, times(1)).isAccelerated();
     verify(reconciliationCache, times(1)).lockActiveWorker(any(), anyLong());
     verify(reconciliationCache, times(1)).unlockActiveWorker(any());
@@ -113,9 +116,9 @@ public class DirectoryReconcilerTest {
     directoryReconciler.start(new SynchronousExecutorService());
     directoryReconciler.stop();
 
-    verify(accountsManager, times(1)).getAllNumbers(eq(VALID_FROM_NUMBER), anyInt());
+    verify(accountsManager, times(1)).getAllFrom(eq(VALID_NUMBER), anyInt());
 
-    verify(reconciliationClient, times(1)).sendChunk(eq(Optional.of(VALID_FROM_NUMBER)), eq(Collections.emptyList()));
+    verify(reconciliationClient, times(1)).sendChunk(eq(Optional.of(VALID_NUMBER)), any());
 
     verify(inProgressReconciliationCache, times(1)).cleanUpWorkerSet(anyLong());
     verify(inProgressReconciliationCache, times(1)).joinWorkerSet(any());
@@ -136,14 +139,14 @@ public class DirectoryReconcilerTest {
 
   @Test
   public void testNotFound() {
-    DirectoryReconciler directoryReconciler = new DirectoryReconciler(reconciliationClient, reconciliationCache, notFoundAccountsManager);
+    DirectoryReconciler directoryReconciler = new DirectoryReconciler(notFoundReconciliationClient, reconciliationCache, notFoundAccountsManager);
     directoryReconciler.start(new SynchronousExecutorService());
     directoryReconciler.stop();
 
-    verify(notFoundAccountsManager, times(1)).getAllNumbers(anyInt());
+    verify(notFoundAccountsManager, times(1)).getAll(eq(0), anyInt());
     verify(notFoundAccountsManager, times(1)).getCount();
 
-    verify(reconciliationClient, times(1)).sendChunk(eq(Optional.absent()), eq(Arrays.asList(NOT_FOUND_FROM_NUMBER)));
+    verify(notFoundReconciliationClient, times(1)).sendChunk(eq(Optional.absent()), any());
 
     verify(reconciliationCache, times(1)).cleanUpWorkerSet(anyLong());
     verify(reconciliationCache, times(1)).joinWorkerSet(any());
@@ -159,7 +162,7 @@ public class DirectoryReconcilerTest {
     verify(reconciliationCache, times(1)).unlockActiveWorker(any());
 
     verifyNoMoreInteractions(notFoundAccountsManager);
-    verifyNoMoreInteractions(reconciliationClient);
+    verifyNoMoreInteractions(notFoundReconciliationClient);
     verifyNoMoreInteractions(reconciliationCache);
   }
 

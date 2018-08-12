@@ -25,12 +25,14 @@ import com.google.common.base.Optional;
 import io.dropwizard.lifecycle.Managed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
 import org.whispersystems.textsecuregcm.util.Constants;
 import org.whispersystems.textsecuregcm.util.Hex;
 
 import javax.ws.rs.ProcessingException;
 import javax.ws.rs.core.Response;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -153,42 +155,51 @@ public class DirectoryReconciler implements Managed, Runnable {
   }
 
   private void processChunk() {
-    Optional<String> fromNumber = reconciliationCache.getLastNumber();
-    int              chunkSize  = (int) (Math.max(getAccountCount(), 1L) * PERIOD / CHUNK_INTERVAL);
-    List<String>     numbers    = readChunk(fromNumber, chunkSize);
+    Optional<String>               fromNumber          = reconciliationCache.getLastNumber();
+    int                            chunkSize           = (int) (Math.max(getAccountCount(), 1L) * PERIOD / CHUNK_INTERVAL);
+    DirectoryReconciliationRequest request             = readChunk(fromNumber, chunkSize);
+    Response                       sendChunkResponse   = sendChunk(fromNumber, request);
+    boolean                        sendChunkSuccessful = sendChunkResponse.getStatusInfo().getFamily() == Response.Status.Family.SUCCESSFUL;
 
-    Optional<String> toNumber = Optional.absent();
-    if (!numbers.isEmpty()) {
-      toNumber = Optional.of(numbers.get(numbers.size() - 1));
-    }
-
-    Response sendChunkResponse   = sendChunk(fromNumber, numbers);
-    boolean  sendChunkSuccessful = sendChunkResponse.getStatusInfo().getFamily() == Response.Status.Family.SUCCESSFUL;
-
-    if (!sendChunkSuccessful || !toNumber.isPresent()) {
+    if (!sendChunkSuccessful || request.getToNumber() == null) {
       reconciliationCache.clearAccelerate();
     }
 
     if (sendChunkSuccessful) {
-      reconciliationCache.setLastNumber(toNumber);
+      reconciliationCache.setLastNumber(Optional.fromNullable(request.getToNumber()));
     } else if (sendChunkResponse.getStatus() == 404) {
       reconciliationCache.setLastNumber(Optional.absent());
     }
   }
 
-  private List<String> readChunk(Optional<String> fromNumber, int chunkSize) {
+  private DirectoryReconciliationRequest readChunk(Optional<String> fromNumber, int chunkSize) {
     try (Timer.Context timer = readChunkTimer.time()) {
+      List<Account> accounts;
       if (fromNumber.isPresent()) {
-        return accountsManager.getAllNumbers(fromNumber.get(), chunkSize);
+        accounts = accountsManager.getAllFrom(fromNumber.get(), chunkSize);
       } else {
-        return accountsManager.getAllNumbers(chunkSize);
+        accounts = accountsManager.getAll(0, chunkSize);
       }
+
+      List<String> numbers = new ArrayList<>(accounts.size());
+      for (Account account : accounts) {
+        if (account.isActive()) {
+          numbers.add(account.getNumber());
+        }
+      }
+
+      Optional<String> toNumber = Optional.absent();
+      if (!accounts.isEmpty()) {
+        toNumber = Optional.of(accounts.get(accounts.size() - 1).getNumber());
+      }
+
+      return new DirectoryReconciliationRequest(numbers, toNumber.orNull());
     }
   }
 
-  private Response sendChunk(Optional<String> fromNumber, List<String> numbers) {
+  private Response sendChunk(Optional<String> fromNumber, DirectoryReconciliationRequest request) {
     try (Timer.Context timer = sendChunkTimer.time()) {
-      Response response = reconciliationClient.sendChunk(fromNumber, numbers);
+      Response response = reconciliationClient.sendChunk(fromNumber, request);
       if (response.getStatusInfo().getFamily() != Response.Status.Family.SUCCESSFUL) {
         sendChunkErrorMeter.mark();
         logger.warn("http error " + response.getStatus());

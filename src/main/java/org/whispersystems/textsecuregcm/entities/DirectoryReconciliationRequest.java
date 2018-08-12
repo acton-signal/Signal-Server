@@ -25,15 +25,24 @@ public class DirectoryReconciliationRequest {
   @JsonProperty
   private List<String> numbers;
 
+  @JsonProperty
+  private String toNumber;
+
+
   public DirectoryReconciliationRequest() {
   }
 
-  public DirectoryReconciliationRequest(List<String> numbers) {
-    this.numbers = numbers;
+  public DirectoryReconciliationRequest(List<String> numbers, String toNumber) {
+    this.numbers  = numbers;
+    this.toNumber = toNumber;
   }
 
   public List<String> getNumbers() {
     return numbers;
+  }
+
+  public String getToNumber() {
+    return toNumber;
   }
 
 }

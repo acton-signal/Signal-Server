@@ -83,7 +83,7 @@ public class DirectoryReconciliationClient {
     }
   }
 
-  public Response sendChunk(Optional<String> fromNumber, List<String> numbers) {
+  public Response sendChunk(Optional<String> fromNumber, DirectoryReconciliationRequest request) {
     String reconcilePath;
     if (fromNumber.isPresent()) {
       reconcilePath = String.format("/v1/directory/reconcile/%s", fromNumber);
@@ -94,7 +94,7 @@ public class DirectoryReconciliationClient {
     return client.target(replicationUrl)
                  .path(reconcilePath)
                  .request()
-                 .put(Entity.json(new DirectoryReconciliationRequest(numbers)));
+                 .put(Entity.json(request));
   }
 
 }
