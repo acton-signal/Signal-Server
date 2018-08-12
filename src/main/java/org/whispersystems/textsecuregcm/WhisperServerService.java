@@ -31,7 +31,6 @@ import org.whispersystems.dropwizard.simpleauth.BasicCredentialAuthFilter;
 import org.whispersystems.textsecuregcm.auth.AccountAuthenticator;
 import org.whispersystems.textsecuregcm.auth.FederatedPeerAuthenticator;
 import org.whispersystems.textsecuregcm.auth.TurnTokenGenerator;
-import org.whispersystems.textsecuregcm.configuration.DirectoryConfiguration;
 import org.whispersystems.textsecuregcm.controllers.AccountController;
 import org.whispersystems.textsecuregcm.controllers.AttachmentController;
 import org.whispersystems.textsecuregcm.controllers.DeviceController;
@@ -72,8 +71,10 @@ import org.whispersystems.textsecuregcm.sqs.ContactDiscoveryQueueSender;
 import org.whispersystems.textsecuregcm.storage.Account;
 import org.whispersystems.textsecuregcm.storage.Accounts;
 import org.whispersystems.textsecuregcm.storage.AccountsManager;
+import org.whispersystems.textsecuregcm.storage.DirectoryReconciliationClient;
 import org.whispersystems.textsecuregcm.storage.DirectoryManager;
 import org.whispersystems.textsecuregcm.storage.DirectoryReconciler;
+import org.whispersystems.textsecuregcm.storage.DirectoryReconciliationCache;
 import org.whispersystems.textsecuregcm.storage.Keys;
 import org.whispersystems.textsecuregcm.storage.Messages;
 import org.whispersystems.textsecuregcm.storage.MessagesCache;
@@ -196,8 +197,11 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     ReceiptSender            receiptSender       = new ReceiptSender(accountsManager, pushSender, federatedClientManager);
     TurnTokenGenerator       turnTokenGenerator  = new TurnTokenGenerator(config.getTurnConfiguration());
 
-    ContactDiscoveryQueueSender cdsSender           = new ContactDiscoveryQueueSender(config.getDirectoryConfiguration().getSqsConfiguration());
-    DirectoryReconciler         directoryReconciler = new DirectoryReconciler(config.getDirectoryConfiguration().getDirectoryServerConfiguration(), cacheClient, accountsManager);
+    ContactDiscoveryQueueSender cdsSender = new ContactDiscoveryQueueSender(config.getDirectoryConfiguration().getSqsConfiguration());
+
+    DirectoryReconciliationCache  directoryReconciliationCache  = new DirectoryReconciliationCache(cacheClient);
+    DirectoryReconciliationClient directoryReconciliationClient = new DirectoryReconciliationClient(config.getDirectoryConfiguration().getDirectoryServerConfiguration());
+    DirectoryReconciler           directoryReconciler           = new DirectoryReconciler(directoryReconciliationClient, directoryReconciliationCache, accountsManager);
 
     messagesCache.setPubSubManager(pubSubManager, pushSender);
 
