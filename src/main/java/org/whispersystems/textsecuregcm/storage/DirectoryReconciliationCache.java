@@ -34,6 +34,7 @@ public class DirectoryReconciliationCache {
   private static final String ACCELERATE_KEY    = "directory_reconciliation_accelerate";
 
   private static final long CACHED_COUNT_TTL_MS = 21600_000L;
+  private static final long LAST_NUMBER_TTL_MS  = 86400_000L;
 
   private final ReplicatedJedisPool jedisPool;
   private final UnlockOperation     unlockOperation;
@@ -101,7 +102,7 @@ public class DirectoryReconciliationCache {
   public void setLastNumber(Optional<String> lastNumber) {
     try (Jedis jedis = jedisPool.getWriteResource()) {
       if (lastNumber.isPresent()) {
-        jedis.set(LAST_NUMBER_KEY, lastNumber.get());
+        jedis.psetex(LAST_NUMBER_KEY, LAST_NUMBER_TTL_MS, lastNumber.get());
       } else {
         jedis.del(LAST_NUMBER_KEY);
       }
