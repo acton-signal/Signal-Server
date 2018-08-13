@@ -27,7 +27,6 @@ import java.util.List;
 
 public class DirectoryReconciliationCache {
 
-  private static final String WORKER_SET_KEY    = "directory_reconciliation_workers";
   private static final String ACTIVE_WORKER_KEY = "directory_reconciliation_active_worker";
   private static final String LAST_NUMBER_KEY   = "directory_reconciliation_last_number";
   private static final String CACHED_COUNT_KEY  = "directory_reconciliation_cached_count";
@@ -44,33 +43,6 @@ public class DirectoryReconciliationCache {
     this.unlockOperation = new UnlockOperation(jedisPool);
   }
 
-  public void cleanUpWorkerSet(long ttlMs) {
-    try (Jedis jedis = jedisPool.getWriteResource()) {
-      long nowMs = System.currentTimeMillis();
-      jedis.zremrangeByScore(WORKER_SET_KEY, Double.NEGATIVE_INFINITY, (double) (nowMs - ttlMs));
-    }
-  }
-
-  public void joinWorkerSet(String workerId) {
-    try (Jedis jedis = jedisPool.getWriteResource()) {
-      long nowMs = System.currentTimeMillis();
-      jedis.zadd(WORKER_SET_KEY, (double) nowMs, workerId);
-    }
-  }
-
-  public void leaveWorkerSet(String workerId) {
-    try (Jedis jedis = jedisPool.getWriteResource()) {
-      jedis.zrem(WORKER_SET_KEY, workerId);
-    }
-  }
-
-  public long getWorkerCount(long ttlMs) {
-    try (Jedis jedis = jedisPool.getWriteResource()) {
-      long nowMs = System.currentTimeMillis();
-      return jedis.zcount(WORKER_SET_KEY, (double) (nowMs - ttlMs), Double.POSITIVE_INFINITY);
-    }
-  }
-
   public void clearAccelerate() {
     try (Jedis jedis = jedisPool.getWriteResource()) {
       jedis.del(ACCELERATE_KEY);
@@ -83,14 +55,11 @@ public class DirectoryReconciliationCache {
     }
   }
 
-  public boolean lockActiveWorker(String workerId, long ttlMs) {
+  public boolean claimActiveWork(String workerId, long ttlMs) {
+    unlockOperation.unlock(ACTIVE_WORKER_KEY, workerId);
     try (Jedis jedis = jedisPool.getWriteResource()) {
       return "OK".equals(jedis.set(ACTIVE_WORKER_KEY, workerId, "NX", "PX", ttlMs));
     }
-  }
-
-  public void unlockActiveWorker(String workerId) {
-    unlockOperation.unlock(ACTIVE_WORKER_KEY, workerId);
   }
 
   public Optional<String> getLastNumber() {

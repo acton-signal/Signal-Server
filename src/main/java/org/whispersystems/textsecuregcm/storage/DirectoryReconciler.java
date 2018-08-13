@@ -90,13 +90,6 @@ public class DirectoryReconciler implements Managed, Runnable {
   public void start(ScheduledExecutorService executor) {
     this.executor = executor;
 
-    try {
-      reconciliationCache.cleanUpWorkerSet(WORKER_TTL_MS);
-    } catch (Exception ex) {
-      logger.warn("failed to clean up worker set", ex);
-    }
-
-    this.executor.scheduleWithFixedDelay(new PingTask(workerId, reconciliationCache), 0, WORKER_TTL_MS / 2, TimeUnit.MILLISECONDS);
     scheduleWithJitter(CHUNK_INTERVAL);
   }
 
@@ -109,39 +102,24 @@ public class DirectoryReconciler implements Managed, Runnable {
     } catch (InterruptedException ex) {
       throw new AssertionError(ex);
     }
-
-    try {
-      reconciliationCache.leaveWorkerSet(workerId);
-    } catch (Exception ex) {
-      logger.warn("failed to remove from worker set", ex);
-    }
   }
 
   @Override
   public void run() {
-    boolean accelerate  = false;
-    long    workerCount = 1;
+    boolean accelerate = false;
 
     try {
-      if (reconciliationCache.lockActiveWorker(workerId, CHUNK_INTERVAL)) {
-        try {
-          if (processChunk()) {
-            accelerate = reconciliationCache.isAccelerated();
-          }
-        } finally {
-          reconciliationCache.unlockActiveWorker(workerId);
+      if (reconciliationCache.claimActiveWork(workerId, CHUNK_INTERVAL)) {
+        if (processChunk()) {
+          accelerate = reconciliationCache.isAccelerated();
         }
-      }
-
-      if (!accelerate) {
-        workerCount = Math.max(reconciliationCache.getWorkerCount(WORKER_TTL_MS), 1);
       }
     } catch (Exception ex) {
       logger.warn("error in directory reconciliation", ex);
     }
 
     if (!accelerate) {
-      scheduleWithJitter(CHUNK_INTERVAL * workerCount);
+      scheduleWithJitter(CHUNK_INTERVAL);
     } else {
       scheduleWithJitter(ACCELERATE_CHUNK_INTERVAL);
     }
@@ -223,26 +201,6 @@ public class DirectoryReconciler implements Managed, Runnable {
     long count = accountsManager.getCount();
     reconciliationCache.setCachedAccountCount(count);
     return count;
-  }
-
-  private static class PingTask implements Runnable {
-
-    private final String                       workerId;
-    private final DirectoryReconciliationCache reconciliationCache;
-
-    PingTask(String workerId, DirectoryReconciliationCache reconciliationCache) {
-      this.workerId            = workerId;
-      this.reconciliationCache = reconciliationCache;
-    }
-
-    @Override
-    public void run() {
-      try {
-        reconciliationCache.joinWorkerSet(workerId);
-      } catch (Exception ex) {
-        logger.warn("error joining worker set: ", ex);
-      }
-    }
   }
 
 }
