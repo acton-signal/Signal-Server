@@ -178,12 +178,7 @@ public class DirectoryReconciler implements Managed, Runnable {
 
   private DirectoryReconciliationRequest readChunk(Optional<String> fromNumber, int chunkSize) {
     try (Timer.Context timer = readChunkTimer.time()) {
-      List<Account> accounts;
-      if (fromNumber.isPresent()) {
-        accounts = accountsManager.getAllFrom(fromNumber.get(), chunkSize);
-      } else {
-        accounts = accountsManager.getAll(0, chunkSize);
-      }
+      List<Account> accounts = accountsManager.getAllFrom(fromNumber, chunkSize);
 
       List<String> numbers = new ArrayList<>(accounts.size());
       for (Account account : accounts) {

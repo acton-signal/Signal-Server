@@ -77,6 +77,10 @@ public abstract class Accounts {
   public abstract Iterator<Account> getAll();
 
   @Mapper(AccountMapper.class)
+  @SqlQuery("SELECT * FROM accounts ORDER BY " + NUMBER + " LIMIT :limit")
+  public abstract List<Account> getAllFrom(@Bind("limit") int length);
+
+  @Mapper(AccountMapper.class)
   @SqlQuery("SELECT * FROM accounts WHERE " + NUMBER + " > :from ORDER BY " + NUMBER + " LIMIT :limit")
   public abstract List<Account> getAllFrom(@Bind("from") String from, @Bind("limit") int length);
 

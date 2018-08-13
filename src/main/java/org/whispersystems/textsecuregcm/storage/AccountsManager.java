@@ -61,8 +61,12 @@ public class AccountsManager {
     return accounts.getAll();
   }
 
-  public List<Account> getAllFrom(String from, int length) {
-    return accounts.getAllFrom(from, length);
+  public List<Account> getAllFrom(Optional<String> from, int length) {
+    if (from.isPresent()) {
+      return accounts.getAllFrom(length);
+    } else {
+      return accounts.getAllFrom(from.get(), length);
+    }
   }
 
   public boolean create(Account account) {

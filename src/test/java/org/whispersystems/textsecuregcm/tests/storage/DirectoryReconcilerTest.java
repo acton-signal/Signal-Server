@@ -51,9 +51,9 @@ public class DirectoryReconcilerTest {
     when(inactiveAccount.getNumber()).thenReturn(INACTIVE_NUMBER);
     when(inactiveAccount.isActive()).thenReturn(false);
 
-    when(accountsManager.getAll(eq(0), anyInt())).thenReturn(Arrays.asList(account, inactiveAccount));
-    when(accountsManager.getAllFrom(eq(VALID_NUMBER), anyInt())).thenReturn(Arrays.asList(inactiveAccount));
-    when(accountsManager.getAllFrom(eq(INACTIVE_NUMBER), anyInt())).thenReturn(Collections.emptyList());
+    when(accountsManager.getAllFrom(eq(Optional.absent()), anyInt())).thenReturn(Arrays.asList(account, inactiveAccount));
+    when(accountsManager.getAllFrom(eq(Optional.of(VALID_NUMBER)), anyInt())).thenReturn(Arrays.asList(inactiveAccount));
+    when(accountsManager.getAllFrom(eq(Optional.of(INACTIVE_NUMBER)), anyInt())).thenReturn(Collections.emptyList());
     when(accountsManager.getCount()).thenReturn(ACCOUNT_COUNT);
 
     when(reconciliationClient.sendChunk(any())).thenReturn(successResponse);
@@ -86,7 +86,7 @@ public class DirectoryReconcilerTest {
     directoryReconciler.start(new SynchronousExecutorService());
     directoryReconciler.stop();
 
-    verify(accountsManager, times(1)).getAll(eq(0), anyInt());
+    verify(accountsManager, times(1)).getAllFrom(eq(Optional.absent()), anyInt());
     verify(accountsManager, times(1)).getCount();
 
     ArgumentCaptor<DirectoryReconciliationRequest> request = ArgumentCaptor.forClass(DirectoryReconciliationRequest.class);
@@ -121,7 +121,7 @@ public class DirectoryReconcilerTest {
     directoryReconciler.start(new SynchronousExecutorService());
     directoryReconciler.stop();
 
-    verify(accountsManager, times(1)).getAllFrom(eq(VALID_NUMBER), anyInt());
+    verify(accountsManager, times(1)).getAllFrom(eq(Optional.of(VALID_NUMBER)), anyInt());
 
     ArgumentCaptor<DirectoryReconciliationRequest> request = ArgumentCaptor.forClass(DirectoryReconciliationRequest.class);
     verify(reconciliationClient, times(1)).sendChunk(request.capture());
@@ -154,7 +154,7 @@ public class DirectoryReconcilerTest {
     directoryReconciler.start(new SynchronousExecutorService());
     directoryReconciler.stop();
 
-    verify(accountsManager, times(1)).getAllFrom(eq(INACTIVE_NUMBER), anyInt());
+    verify(accountsManager, times(1)).getAllFrom(eq(Optional.of(INACTIVE_NUMBER)), anyInt());
 
     ArgumentCaptor<DirectoryReconciliationRequest> request = ArgumentCaptor.forClass(DirectoryReconciliationRequest.class);
     verify(reconciliationClient, times(1)).sendChunk(request.capture());
@@ -188,7 +188,7 @@ public class DirectoryReconcilerTest {
     directoryReconciler.start(new SynchronousExecutorService());
     directoryReconciler.stop();
 
-    verify(accountsManager, times(1)).getAll(eq(0), anyInt());
+    verify(accountsManager, times(1)).getAllFrom(eq(Optional.absent()), anyInt());
 
     ArgumentCaptor<DirectoryReconciliationRequest> request = ArgumentCaptor.forClass(DirectoryReconciliationRequest.class);
     verify(reconciliationClient, times(1)).sendChunk(request.capture());
