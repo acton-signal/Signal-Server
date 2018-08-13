@@ -35,7 +35,6 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
-import java.util.List;
 
 public class DirectoryReconciliationClient {
 
@@ -86,7 +85,7 @@ public class DirectoryReconciliationClient {
   public Response sendChunk(Optional<String> fromNumber, DirectoryReconciliationRequest request) {
     String reconcilePath;
     if (fromNumber.isPresent()) {
-      reconcilePath = String.format("/v1/directory/reconcile/%s", fromNumber);
+      reconcilePath = String.format("/v1/directory/reconcile/%s", fromNumber.get());
     } else {
       reconcilePath = "/v1/directory/reconcile";
     }
