@@ -66,19 +66,11 @@ public class DirectoryController {
 
   public DirectoryController(RateLimiters rateLimiters,
                              DirectoryManager directory,
-                             DirectoryConfiguration directoryConfig)
+                             DirectoryCredentialsGenerator userTokenGenerator)
   {
-    this.directory    = directory;
-    this.rateLimiters = rateLimiters;
-
-    try {
-      this.userTokenGenerator = new DirectoryCredentialsGenerator(
-              directoryConfig.getDirectoryClientConfiguration().getUserAuthenticationTokenSharedSecret(),
-              directoryConfig.getDirectoryClientConfiguration().getUserAuthenticationTokenUserIdSecret()
-      );
-    } catch (DecoderException e) {
-      throw new IllegalArgumentException(e);
-    }
+    this.directory          = directory;
+    this.rateLimiters       = rateLimiters;
+    this.userTokenGenerator = userTokenGenerator;
   }
 
   @Timed

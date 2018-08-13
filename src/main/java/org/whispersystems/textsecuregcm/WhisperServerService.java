@@ -29,6 +29,7 @@ import org.whispersystems.dropwizard.simpleauth.AuthDynamicFeature;
 import org.whispersystems.dropwizard.simpleauth.AuthValueFactoryProvider;
 import org.whispersystems.dropwizard.simpleauth.BasicCredentialAuthFilter;
 import org.whispersystems.textsecuregcm.auth.AccountAuthenticator;
+import org.whispersystems.textsecuregcm.auth.DirectoryCredentialsGenerator;
 import org.whispersystems.textsecuregcm.auth.FederatedPeerAuthenticator;
 import org.whispersystems.textsecuregcm.auth.TurnTokenGenerator;
 import org.whispersystems.textsecuregcm.controllers.AccountController;
@@ -199,6 +200,8 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
 
     ContactDiscoveryQueueSender cdsSender = new ContactDiscoveryQueueSender(config.getDirectoryConfiguration().getSqsConfiguration());
 
+    DirectoryCredentialsGenerator directoryCredentialsGenerator = new DirectoryCredentialsGenerator(config.getDirectoryConfiguration().getDirectoryClientConfiguration().getUserAuthenticationTokenSharedSecret(),
+                                                                                                    config.getDirectoryConfiguration().getDirectoryClientConfiguration().getUserAuthenticationTokenUserIdSecret());
     DirectoryReconciliationCache  directoryReconciliationCache  = new DirectoryReconciliationCache(cacheClient);
     DirectoryReconciliationClient directoryReconciliationClient = new DirectoryReconciliationClient(config.getDirectoryConfiguration().getDirectoryServerConfiguration());
     DirectoryReconciler           directoryReconciler           = new DirectoryReconciler(directoryReconciliationClient, directoryReconciliationCache, accountsManager);
@@ -229,7 +232,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
 
     environment.jersey().register(new AccountController(pendingAccountsManager, accountsManager, rateLimiters, smsSender, cdsSender, messagesManager, turnTokenGenerator, config.getTestDevices()));
     environment.jersey().register(new DeviceController(pendingDevicesManager, accountsManager, messagesManager, cdsSender, rateLimiters, config.getMaxDevices()));
-    environment.jersey().register(new DirectoryController(rateLimiters, directory, config.getDirectoryConfiguration()));
+    environment.jersey().register(new DirectoryController(rateLimiters, directory, directoryCredentialsGenerator));
     environment.jersey().register(new FederationControllerV1(accountsManager, attachmentController, messageController));
     environment.jersey().register(new FederationControllerV2(accountsManager, attachmentController, messageController, keysController));
     environment.jersey().register(new ProvisioningController(rateLimiters, pushSender));

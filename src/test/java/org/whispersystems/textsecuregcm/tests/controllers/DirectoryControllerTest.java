@@ -9,6 +9,7 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 import org.whispersystems.dropwizard.simpleauth.AuthValueFactoryProvider;
 import org.whispersystems.textsecuregcm.auth.DirectoryCredentials;
+import org.whispersystems.textsecuregcm.auth.DirectoryCredentialsGenerator;
 import org.whispersystems.textsecuregcm.configuration.DirectoryConfiguration;
 import org.whispersystems.textsecuregcm.configuration.DirectoryClientConfiguration;
 import org.whispersystems.textsecuregcm.controllers.DirectoryController;
@@ -28,28 +29,19 @@ import java.util.List;
 import io.dropwizard.testing.junit.ResourceTestRule;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyListOf;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Matchers.anyList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 public class DirectoryControllerTest {
 
-  private final RateLimiters     rateLimiters     = mock(RateLimiters.class    );
-  private final RateLimiter      rateLimiter      = mock(RateLimiter.class     );
-  private final DirectoryManager directoryManager = mock(DirectoryManager.class);
+  private final RateLimiters                  rateLimiters                  = mock(RateLimiters.class);
+  private final RateLimiter                   rateLimiter                   = mock(RateLimiter.class);
+  private final DirectoryManager              directoryManager              = mock(DirectoryManager.class);
+  private final DirectoryCredentialsGenerator directoryCredentialsGenerator = mock(DirectoryCredentialsGenerator.class);
 
-  private final DirectoryConfiguration directoryConfig             = mock(DirectoryConfiguration.class);
-  private final DirectoryClientConfiguration directoryClientConfig = mock(DirectoryClientConfiguration.class);
-
-  {
-    try {
-      when(directoryConfig.getDirectoryClientConfiguration()).thenReturn(directoryClientConfig);
-      when(directoryClientConfig.getUserAuthenticationTokenSharedSecret()).thenReturn(new byte[100]);
-      when(directoryClientConfig.getUserAuthenticationTokenUserIdSecret()).thenReturn(new byte[100]);
-    } catch (Exception e) {
-      throw new AssertionError(e);
-    }
-  }
+  private final DirectoryCredentials validCredentials = new DirectoryCredentials("username", "password");
 
   @Rule
   public final ResourceTestRule resources = ResourceTestRule.builder()
@@ -58,7 +50,7 @@ public class DirectoryControllerTest {
                                                             .setTestContainerFactory(new GrizzlyWebTestContainerFactory())
                                                             .addResource(new DirectoryController(rateLimiters,
                                                                                                  directoryManager,
-                                                                                                 directoryConfig))
+                                                                                                 directoryCredentialsGenerator))
                                                             .build();
 
 
@@ -74,6 +66,7 @@ public class DirectoryControllerTest {
         return response;
       }
     });
+    when(directoryCredentialsGenerator.generateFor(eq(AuthHelper.VALID_NUMBER))).thenReturn(validCredentials);
   }
 
   @Test
@@ -84,8 +77,8 @@ public class DirectoryControllerTest {
                      .request()
                      .header("Authorization", AuthHelper.getAuthHeader(AuthHelper.VALID_NUMBER, AuthHelper.VALID_PASSWORD))
                      .get(DirectoryCredentials.class);
-    assertThat(token.getUsername()).isNotEqualTo(AuthHelper.VALID_NUMBER);
-    assertThat(token.getPassword()).startsWith(token.getUsername() + ":");
+    assertThat(token.getUsername()).isEqualTo(validCredentials.getUsername());
+    assertThat(token.getPassword()).isEqualTo(validCredentials.getPassword());
   }
 
   @Test
