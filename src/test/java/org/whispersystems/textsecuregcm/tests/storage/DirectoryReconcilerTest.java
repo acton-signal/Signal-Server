@@ -56,7 +56,7 @@ public class DirectoryReconcilerTest {
     when(accountsManager.getAllFrom(eq(INACTIVE_NUMBER), anyInt())).thenReturn(Collections.emptyList());
     when(accountsManager.getCount()).thenReturn(ACCOUNT_COUNT);
 
-    when(reconciliationClient.sendChunk(any(), any())).thenReturn(successResponse);
+    when(reconciliationClient.sendChunk(any())).thenReturn(successResponse);
 
     when(reconciliationCache.getLastNumber()).thenReturn(Optional.absent());
     when(reconciliationCache.getCachedAccountCount()).thenReturn(Optional.of(ACCOUNT_COUNT));
@@ -90,8 +90,9 @@ public class DirectoryReconcilerTest {
     verify(accountsManager, times(1)).getCount();
 
     ArgumentCaptor<DirectoryReconciliationRequest> request = ArgumentCaptor.forClass(DirectoryReconciliationRequest.class);
-    verify(reconciliationClient, times(1)).sendChunk(eq(Optional.absent()), request.capture());
+    verify(reconciliationClient, times(1)).sendChunk(request.capture());
 
+    assertThat(request.getValue().getFromNumber()).isNull();
     assertThat(request.getValue().getToNumber()).isEqualTo(INACTIVE_NUMBER);
     assertThat(request.getValue().getNumbers()).isEqualTo(Arrays.asList(VALID_NUMBER));
 
@@ -123,8 +124,9 @@ public class DirectoryReconcilerTest {
     verify(accountsManager, times(1)).getAllFrom(eq(VALID_NUMBER), anyInt());
 
     ArgumentCaptor<DirectoryReconciliationRequest> request = ArgumentCaptor.forClass(DirectoryReconciliationRequest.class);
-    verify(reconciliationClient, times(1)).sendChunk(eq(Optional.of(VALID_NUMBER)), request.capture());
+    verify(reconciliationClient, times(1)).sendChunk(request.capture());
 
+    assertThat(request.getValue().getFromNumber()).isEqualTo(VALID_NUMBER);
     assertThat(request.getValue().getToNumber()).isEqualTo(INACTIVE_NUMBER);
     assertThat(request.getValue().getNumbers()).isEqualTo(Collections.emptyList());
 
@@ -155,8 +157,9 @@ public class DirectoryReconcilerTest {
     verify(accountsManager, times(1)).getAllFrom(eq(INACTIVE_NUMBER), anyInt());
 
     ArgumentCaptor<DirectoryReconciliationRequest> request = ArgumentCaptor.forClass(DirectoryReconciliationRequest.class);
-    verify(reconciliationClient, times(1)).sendChunk(eq(Optional.of(INACTIVE_NUMBER)), request.capture());
+    verify(reconciliationClient, times(1)).sendChunk(request.capture());
 
+    assertThat(request.getValue().getFromNumber()).isEqualTo(INACTIVE_NUMBER);
     assertThat(request.getValue().getToNumber()).isNull();
     assertThat(request.getValue().getNumbers()).isEqualTo(Collections.emptyList());
 
@@ -179,7 +182,7 @@ public class DirectoryReconcilerTest {
 
   @Test
   public void testNotFound() {
-    when(reconciliationClient.sendChunk(any(), any())).thenReturn(notFoundResponse);
+    when(reconciliationClient.sendChunk(any())).thenReturn(notFoundResponse);
 
     DirectoryReconciler directoryReconciler = new DirectoryReconciler(reconciliationClient, reconciliationCache, accountsManager);
     directoryReconciler.start(new SynchronousExecutorService());
@@ -188,8 +191,9 @@ public class DirectoryReconcilerTest {
     verify(accountsManager, times(1)).getAll(eq(0), anyInt());
 
     ArgumentCaptor<DirectoryReconciliationRequest> request = ArgumentCaptor.forClass(DirectoryReconciliationRequest.class);
-    verify(reconciliationClient, times(1)).sendChunk(eq(Optional.absent()), request.capture());
+    verify(reconciliationClient, times(1)).sendChunk(request.capture());
 
+    assertThat(request.getValue().getFromNumber()).isNull();
     assertThat(request.getValue().getToNumber()).isEqualTo(INACTIVE_NUMBER);
     assertThat(request.getValue().getNumbers()).isEqualTo(Arrays.asList(VALID_NUMBER));
 

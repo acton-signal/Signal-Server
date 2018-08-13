@@ -160,7 +160,7 @@ public class DirectoryReconciler implements Managed, Runnable {
     Optional<String>               fromNumber          = reconciliationCache.getLastNumber();
     int                            chunkSize           = (int) Math.max(getAccountCount() * PERIOD / CHUNK_INTERVAL, MINIMUM_CHUNK_SIZE);
     DirectoryReconciliationRequest request             = readChunk(fromNumber, chunkSize);
-    Response                       sendChunkResponse   = sendChunk(fromNumber, request);
+    Response                       sendChunkResponse   = sendChunk(request);
     boolean                        sendChunkSuccessful = sendChunkResponse.getStatusInfo().getFamily() == Response.Status.Family.SUCCESSFUL;
 
     if (sendChunkResponse.getStatus() == 404 || request.getToNumber() == null) {
@@ -197,13 +197,13 @@ public class DirectoryReconciler implements Managed, Runnable {
         toNumber = Optional.of(accounts.get(accounts.size() - 1).getNumber());
       }
 
-      return new DirectoryReconciliationRequest(numbers, toNumber.orNull());
+      return new DirectoryReconciliationRequest(fromNumber.orNull(), toNumber.orNull(), numbers);
     }
   }
 
-  private Response sendChunk(Optional<String> fromNumber, DirectoryReconciliationRequest request) {
+  private Response sendChunk(DirectoryReconciliationRequest request) {
     try (Timer.Context timer = sendChunkTimer.time()) {
-      Response response = reconciliationClient.sendChunk(fromNumber, request);
+      Response response = reconciliationClient.sendChunk(request);
       if (response.getStatusInfo().getFamily() != Response.Status.Family.SUCCESSFUL) {
         sendChunkErrorMeter.mark();
         logger.warn("http error " + response.getStatus());
