@@ -54,6 +54,7 @@ public class DirectoryReconciler implements Managed, Runnable {
   private static final long   PERIOD                    = 86400_000L;
   private static final long   CHUNK_INTERVAL            = 42_000L;
   private static final long   ACCELERATE_CHUNK_INTERVAL = 500L;
+  private static final long   MINIMUM_CHUNK_SIZE        = 2000L;
   private static final double JITTER_MAX                = 0.20;
 
   private final AccountsManager               accountsManager;
@@ -157,7 +158,7 @@ public class DirectoryReconciler implements Managed, Runnable {
 
   private boolean processChunk() {
     Optional<String>               fromNumber          = reconciliationCache.getLastNumber();
-    int                            chunkSize           = (int) (Math.max(getAccountCount(), 1L) * PERIOD / CHUNK_INTERVAL);
+    int                            chunkSize           = (int) Math.max(getAccountCount() * PERIOD / CHUNK_INTERVAL, MINIMUM_CHUNK_SIZE);
     DirectoryReconciliationRequest request             = readChunk(fromNumber, chunkSize);
     Response                       sendChunkResponse   = sendChunk(fromNumber, request);
     boolean                        sendChunkSuccessful = sendChunkResponse.getStatusInfo().getFamily() == Response.Status.Family.SUCCESSFUL;
