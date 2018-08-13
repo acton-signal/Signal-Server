@@ -63,9 +63,9 @@ public class AccountsManager {
 
   public List<Account> getAllFrom(Optional<String> from, int length) {
     if (from.isPresent()) {
-      return accounts.getAllFrom(length);
-    } else {
       return accounts.getAllFrom(from.get(), length);
+    } else {
+      return accounts.getAllFrom(length);
     }
   }
 
