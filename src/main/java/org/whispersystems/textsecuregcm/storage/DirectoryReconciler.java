@@ -38,6 +38,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static com.codahale.metrics.MetricRegistry.name;
 
@@ -158,12 +159,10 @@ public class DirectoryReconciler implements Managed, Runnable {
     try (Timer.Context timer = readChunkTimer.time()) {
       List<Account> accounts = accountsManager.getAllFrom(fromNumber, chunkSize);
 
-      List<String> numbers = new ArrayList<>(accounts.size());
-      for (Account account : accounts) {
-        if (account.isActive()) {
-          numbers.add(account.getNumber());
-        }
-      }
+      List<String> numbers = accounts.stream()
+                                     .filter(Account::isActive)
+                                     .map(Account::getNumber)
+                                     .collect(Collectors.toList());
 
       Optional<String> toNumber = Optional.absent();
       if (!accounts.isEmpty()) {
@@ -185,7 +184,7 @@ public class DirectoryReconciler implements Managed, Runnable {
     } catch (ProcessingException ex) {
       sendChunkErrorMeter.mark();
       logger.warn("request error: ", ex);
-      throw ex;
+      throw new ProcessingException(ex);
     }
   }
 
