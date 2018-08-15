@@ -32,6 +32,9 @@ import org.whispersystems.textsecuregcm.util.Hex;
 import javax.ws.rs.ProcessingException;
 import javax.ws.rs.core.Response;
 import java.security.SecureRandom;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -51,12 +54,13 @@ public class DirectoryReconciler implements Managed, Runnable {
   private static final Timer          sendChunkTimer      = metricRegistry.timer(name(DirectoryReconciler.class, "sendChunk"));
   private static final Meter          sendChunkErrorMeter = metricRegistry.meter(name(DirectoryReconciler.class, "sendChunkError"));
 
-  private static final long   WORKER_TTL_MS             = 120_000L;
-  private static final long   PERIOD                    = 86400_000L;
-  private static final long   CHUNK_INTERVAL            = 42_000L;
-  private static final long   ACCELERATE_CHUNK_INTERVAL = 500L;
-  private static final long   MINIMUM_CHUNK_SIZE        = 2000L;
-  private static final double JITTER_MAX                = 0.20;
+  private static final long   WORKER_TTL_MS          = 120_000L;
+  private static final long   PERIOD                 = 86400_000L;
+  private static final long   MAXIMUM_CHUNK_INTERVAL = 120_000L;
+  private static final long   DEFAULT_CHUNK_INTERVAL = 60_000L;
+  private static final long   MINIMUM_CHUNK_INTERVAL = 500L;
+  private static final int    CHUNK_SIZE             = 10000;
+  private static final double JITTER_MAX             = 0.20;
 
   private final AccountsManager               accountsManager;
   private final DirectoryReconciliationClient reconciliationClient;
@@ -91,7 +95,7 @@ public class DirectoryReconciler implements Managed, Runnable {
   public void start(ScheduledExecutorService executor) {
     this.executor = executor;
 
-    scheduleWithJitter(CHUNK_INTERVAL);
+    scheduleWithJitter(DEFAULT_CHUNK_INTERVAL);
   }
 
   @Override
@@ -107,23 +111,38 @@ public class DirectoryReconciler implements Managed, Runnable {
 
   @Override
   public void run() {
-    boolean accelerate = false;
+    long scheduleDelayMs = DEFAULT_CHUNK_INTERVAL;
 
     try {
-      if (reconciliationCache.claimActiveWork(workerId, CHUNK_INTERVAL)) {
+      long    intervalMs       = getBoundedChunkInterval(PERIOD * getAccountCount() / CHUNK_SIZE);
+      Instant nextIntervalTime = Instant.now().plus(intervalMs, ChronoUnit.MILLIS);
+
+      scheduleDelayMs = intervalMs;
+
+      if (reconciliationCache.claimActiveWork(workerId, WORKER_TTL_MS)) {
         if (processChunk()) {
-          accelerate = reconciliationCache.isAccelerated();
+          if (!reconciliationCache.isAccelerated()) {
+            scheduleDelayMs = getTimeUntilNextInterval(nextIntervalTime);
+            reconciliationCache.claimActiveWork(workerId, scheduleDelayMs);
+          } else {
+            scheduleDelayMs = MINIMUM_CHUNK_INTERVAL;
+          }
         }
       }
     } catch (Exception ex) {
       logger.warn("error in directory reconciliation", ex);
     }
 
-    if (!accelerate) {
-      scheduleWithJitter(CHUNK_INTERVAL);
-    } else {
-      scheduleWithJitter(ACCELERATE_CHUNK_INTERVAL);
-    }
+    scheduleWithJitter(scheduleDelayMs);
+  }
+
+  private long getTimeUntilNextInterval(Instant nextIntervalTime) {
+    long nextInterval = Duration.between(Instant.now(), nextIntervalTime).get(ChronoUnit.MILLIS);
+    return getBoundedChunkInterval(nextInterval);
+  }
+
+  private long getBoundedChunkInterval(long intervalMs) {
+    return Math.max(Math.min(intervalMs, MAXIMUM_CHUNK_INTERVAL), MINIMUM_CHUNK_INTERVAL);
   }
 
   private void scheduleWithJitter(long delayMs) {
@@ -137,8 +156,7 @@ public class DirectoryReconciler implements Managed, Runnable {
 
   private boolean processChunk() {
     Optional<String>               fromNumber          = reconciliationCache.getLastNumber();
-    int                            chunkSize           = (int) Math.max(getAccountCount() * PERIOD / CHUNK_INTERVAL, MINIMUM_CHUNK_SIZE);
-    DirectoryReconciliationRequest request             = readChunk(fromNumber, chunkSize);
+    DirectoryReconciliationRequest request             = readChunk(fromNumber, CHUNK_SIZE);
     Response                       sendChunkResponse   = sendChunk(request);
     boolean                        sendChunkSuccessful = sendChunkResponse.getStatusInfo().getFamily() == Response.Status.Family.SUCCESSFUL;
 
