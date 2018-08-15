@@ -26,6 +26,7 @@ import io.dropwizard.lifecycle.Managed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
+import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationResponse;
 import org.whispersystems.textsecuregcm.util.Constants;
 import org.whispersystems.textsecuregcm.util.Hex;
 
@@ -155,22 +156,22 @@ public class DirectoryReconciler implements Managed, Runnable {
   }
 
   private boolean processChunk() {
-    Optional<String>               fromNumber          = reconciliationCache.getLastNumber();
-    DirectoryReconciliationRequest request             = readChunk(fromNumber, CHUNK_SIZE);
-    Response                       sendChunkResponse   = sendChunk(request);
-    boolean                        sendChunkSuccessful = sendChunkResponse.getStatusInfo().getFamily() == Response.Status.Family.SUCCESSFUL;
+    Optional<String>                fromNumber          = reconciliationCache.getLastNumber();
+    DirectoryReconciliationRequest  request             = readChunk(fromNumber, CHUNK_SIZE);
+    DirectoryReconciliationResponse sendChunkResponse   = sendChunk(request);
 
-    if (sendChunkResponse.getStatus() == 404 || request.getToNumber() == null) {
+    if (sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.MISSING ||
+        request.getToNumber() == null) {
       reconciliationCache.clearAccelerate();
     }
 
-    if (sendChunkSuccessful) {
+    if (sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.OK) {
       reconciliationCache.setLastNumber(Optional.fromNullable(request.getToNumber()));
-    } else if (sendChunkResponse.getStatus() == 404) {
+    } else if (sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.MISSING) {
       reconciliationCache.setLastNumber(Optional.absent());
     }
 
-    return sendChunkSuccessful;
+    return sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.OK;
   }
 
   private DirectoryReconciliationRequest readChunk(Optional<String> fromNumber, int chunkSize) {
@@ -191,12 +192,12 @@ public class DirectoryReconciler implements Managed, Runnable {
     }
   }
 
-  private Response sendChunk(DirectoryReconciliationRequest request) {
+  private DirectoryReconciliationResponse sendChunk(DirectoryReconciliationRequest request) {
     try (Timer.Context timer = sendChunkTimer.time()) {
-      Response response = reconciliationClient.sendChunk(request);
-      if (response.getStatusInfo().getFamily() != Response.Status.Family.SUCCESSFUL) {
+      DirectoryReconciliationResponse response = reconciliationClient.sendChunk(request);
+      if (response.getStatus() != DirectoryReconciliationResponse.Status.OK) {
         sendChunkErrorMeter.mark();
-        logger.warn("http error " + response.getStatus());
+        logger.warn("reconciliation error: " + response.getStatus());
       }
       return response;
     } catch (ProcessingException ex) {

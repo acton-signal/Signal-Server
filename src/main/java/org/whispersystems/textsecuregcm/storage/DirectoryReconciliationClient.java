@@ -22,10 +22,12 @@ import org.glassfish.jersey.SslConfigurator;
 import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
 import org.whispersystems.textsecuregcm.configuration.DirectoryServerConfiguration;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
+import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationResponse;
 
 import javax.ws.rs.client.Client;
 import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.Entity;
+import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -82,11 +84,11 @@ public class DirectoryReconciliationClient {
     }
   }
 
-  public Response sendChunk(DirectoryReconciliationRequest request) {
+  public DirectoryReconciliationResponse sendChunk(DirectoryReconciliationRequest request) {
     return client.target(replicationUrl)
                  .path("/v1/directory/reconcile")
-                 .request()
-                 .put(Entity.json(request));
+                 .request(MediaType.APPLICATION_JSON_TYPE)
+                 .put(Entity.json(request), DirectoryReconciliationResponse.class);
   }
 
 }

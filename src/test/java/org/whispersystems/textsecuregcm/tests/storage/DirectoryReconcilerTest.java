@@ -5,6 +5,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
+import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationResponse;
 import org.whispersystems.textsecuregcm.storage.Account;
 import org.whispersystems.textsecuregcm.storage.AccountsManager;
 import org.whispersystems.textsecuregcm.storage.DirectoryReconciler;
@@ -41,8 +42,8 @@ public class DirectoryReconcilerTest {
   private final DirectoryReconciliationClient reconciliationClient          = mock(DirectoryReconciliationClient.class);
   private final DirectoryReconciliationCache  reconciliationCache           = mock(DirectoryReconciliationCache.class);
 
-  private final Response successResponse  = mockResponse(200);
-  private final Response notFoundResponse = mockResponse(404);
+  private final DirectoryReconciliationResponse successResponse  = new DirectoryReconciliationResponse(DirectoryReconciliationResponse.Status.OK);
+  private final DirectoryReconciliationResponse notFoundResponse = new DirectoryReconciliationResponse(DirectoryReconciliationResponse.Status.MISSING);
 
   @Before
   public void setup() {
@@ -62,19 +63,6 @@ public class DirectoryReconcilerTest {
     when(reconciliationCache.getCachedAccountCount()).thenReturn(Optional.of(ACCOUNT_COUNT));
     when(reconciliationCache.claimActiveWork(any(), anyLong())).thenReturn(true);
     when(reconciliationCache.isAccelerated()).thenReturn(false);
-  }
-
-  private static Response mockResponse(int responseStatus) {
-    Response               response          = mock(Response.class);
-    Response.StatusType    statusType        = mock(Response.StatusType.class);
-
-    when(response.getStatus()).thenReturn(responseStatus);
-    when(response.getStatusInfo()).thenReturn(statusType);
-
-    when(statusType.getStatusCode()).thenReturn(responseStatus);
-    when(statusType.getFamily()).thenReturn(Response.Status.Family.familyOf(responseStatus));
-
-    return response;
   }
 
   @Test
