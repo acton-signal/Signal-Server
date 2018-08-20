@@ -13,8 +13,6 @@ import org.whispersystems.textsecuregcm.storage.DirectoryReconciliationCache;
 import org.whispersystems.textsecuregcm.storage.DirectoryReconciliationClient;
 import org.whispersystems.textsecuregcm.tests.util.SynchronousExecutorService;
 
-import javax.ws.rs.core.Response;
-
 import java.util.Arrays;
 import java.util.Collections;
 
@@ -70,8 +68,7 @@ public class DirectoryReconcilerTest {
     when(reconciliationCache.getCachedAccountCount()).thenReturn(Optional.absent());
 
     DirectoryReconciler directoryReconciler = new DirectoryReconciler(reconciliationClient, reconciliationCache, accountsManager);
-    directoryReconciler.start(new SynchronousExecutorService());
-    directoryReconciler.stop();
+    directoryReconciler.doPeriodicWork();
 
     verify(accountsManager, times(1)).getAllFrom(eq(Optional.absent()), anyInt());
     verify(accountsManager, times(1)).getCount();
@@ -88,7 +85,7 @@ public class DirectoryReconcilerTest {
     verify(reconciliationCache, times(1)).getLastNumber();
     verify(reconciliationCache, times(1)).setLastNumber(eq(Optional.of(INACTIVE_NUMBER)));
     verify(reconciliationCache, times(1)).isAccelerated();
-    verify(reconciliationCache, times(1)).claimActiveWork(any(), anyLong());
+    verify(reconciliationCache, times(2)).claimActiveWork(any(), anyLong());
 
     verifyNoMoreInteractions(accountsManager);
     verifyNoMoreInteractions(reconciliationClient);
@@ -100,8 +97,7 @@ public class DirectoryReconcilerTest {
     when(reconciliationCache.getLastNumber()).thenReturn(Optional.of(VALID_NUMBER));
 
     DirectoryReconciler directoryReconciler = new DirectoryReconciler(reconciliationClient, reconciliationCache, accountsManager);
-    directoryReconciler.start(new SynchronousExecutorService());
-    directoryReconciler.stop();
+    directoryReconciler.doPeriodicWork();
 
     verify(accountsManager, times(1)).getAllFrom(eq(Optional.of(VALID_NUMBER)), anyInt());
 
@@ -116,7 +112,7 @@ public class DirectoryReconcilerTest {
     verify(reconciliationCache, times(1)).getLastNumber();
     verify(reconciliationCache, times(1)).setLastNumber(eq(Optional.of(INACTIVE_NUMBER)));
     verify(reconciliationCache, times(1)).isAccelerated();
-    verify(reconciliationCache, times(1)).claimActiveWork(any(), anyLong());
+    verify(reconciliationCache, times(2)).claimActiveWork(any(), anyLong());
 
     verifyNoMoreInteractions(accountsManager);
     verifyNoMoreInteractions(reconciliationClient);
@@ -128,8 +124,7 @@ public class DirectoryReconcilerTest {
     when(reconciliationCache.getLastNumber()).thenReturn(Optional.of(INACTIVE_NUMBER));
 
     DirectoryReconciler directoryReconciler = new DirectoryReconciler(reconciliationClient, reconciliationCache, accountsManager);
-    directoryReconciler.start(new SynchronousExecutorService());
-    directoryReconciler.stop();
+    directoryReconciler.doPeriodicWork();
 
     verify(accountsManager, times(1)).getAllFrom(eq(Optional.of(INACTIVE_NUMBER)), anyInt());
 
@@ -145,7 +140,7 @@ public class DirectoryReconcilerTest {
     verify(reconciliationCache, times(1)).setLastNumber(eq(Optional.absent()));
     verify(reconciliationCache, times(1)).clearAccelerate();
     verify(reconciliationCache, times(1)).isAccelerated();
-    verify(reconciliationCache, times(1)).claimActiveWork(any(), anyLong());
+    verify(reconciliationCache, times(2)).claimActiveWork(any(), anyLong());
 
     verifyNoMoreInteractions(accountsManager);
     verifyNoMoreInteractions(reconciliationClient);
@@ -157,8 +152,7 @@ public class DirectoryReconcilerTest {
     when(reconciliationClient.sendChunk(any())).thenReturn(notFoundResponse);
 
     DirectoryReconciler directoryReconciler = new DirectoryReconciler(reconciliationClient, reconciliationCache, accountsManager);
-    directoryReconciler.start(new SynchronousExecutorService());
-    directoryReconciler.stop();
+    directoryReconciler.doPeriodicWork();
 
     verify(accountsManager, times(1)).getAllFrom(eq(Optional.absent()), anyInt());
 

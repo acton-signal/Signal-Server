@@ -29,19 +29,11 @@ import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationResponse;
 import org.whispersystems.textsecuregcm.util.Constants;
 import org.whispersystems.textsecuregcm.util.Hex;
+import org.whispersystems.textsecuregcm.util.Util;
 
 import javax.ws.rs.ProcessingException;
-import javax.ws.rs.core.Response;
 import java.security.SecureRandom;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static com.codahale.metrics.MetricRegistry.name;
@@ -69,7 +61,8 @@ public class DirectoryReconciler implements Managed, Runnable {
   private final String                        workerId;
   private final SecureRandom                  random;
 
-  private ScheduledExecutorService executor;
+  private boolean running;
+  private boolean finished;
 
   public DirectoryReconciler(DirectoryReconciliationClient reconciliationClient,
                              DirectoryReconciliationCache reconciliationCache,
@@ -88,71 +81,84 @@ public class DirectoryReconciler implements Managed, Runnable {
   }
 
   @Override
-  public void start() {
-    start(Executors.newSingleThreadScheduledExecutor());
-  }
-
-  @VisibleForTesting
-  public void start(ScheduledExecutorService executor) {
-    this.executor = executor;
-
-    scheduleWithJitter(DEFAULT_CHUNK_INTERVAL);
+  public synchronized void start() {
+    running = true;
+    new Thread(this).start();
   }
 
   @Override
-  public void stop() {
-    this.executor.shutdown();
-
-    try {
-      this.executor.awaitTermination(5000, TimeUnit.MILLISECONDS);
-    } catch (InterruptedException ex) {
-      throw new AssertionError(ex);
+  public synchronized void stop() {
+    running = false;
+    notifyAll();
+    while (!finished) {
+      Util.wait(this);
     }
   }
 
   @Override
   public void run() {
-    long scheduleDelayMs = DEFAULT_CHUNK_INTERVAL;
+    long delayMs = DEFAULT_CHUNK_INTERVAL;
+
+    while (sleepWhileRunning(getDelayWithJitter(delayMs))) {
+      delayMs = doPeriodicWork();
+    }
+
+    synchronized (this) {
+      finished = true;
+      notifyAll();
+    }
+  }
+
+  @VisibleForTesting
+  public long doPeriodicWork() {
+    long delayMs = DEFAULT_CHUNK_INTERVAL;
 
     try {
-      long    intervalMs       = getBoundedChunkInterval(PERIOD * getAccountCount() / CHUNK_SIZE);
-      Instant nextIntervalTime = Instant.now().plus(intervalMs, ChronoUnit.MILLIS);
+      long intervalMs         = getBoundedChunkInterval(PERIOD * getAccountCount() / CHUNK_SIZE);
+      long nextIntervalTimeMs = System.currentTimeMillis() + intervalMs;
 
-      scheduleDelayMs = intervalMs;
+      delayMs = intervalMs;
 
       if (reconciliationCache.claimActiveWork(workerId, WORKER_TTL_MS)) {
         if (processChunk()) {
           if (!reconciliationCache.isAccelerated()) {
-            scheduleDelayMs = getTimeUntilNextInterval(nextIntervalTime);
-            reconciliationCache.claimActiveWork(workerId, scheduleDelayMs);
+            delayMs = getTimeUntilNextInterval(nextIntervalTimeMs);
+            reconciliationCache.claimActiveWork(workerId, delayMs);
           } else {
-            scheduleDelayMs = MINIMUM_CHUNK_INTERVAL;
+            delayMs = MINIMUM_CHUNK_INTERVAL;
           }
         }
       }
-    } catch (Exception ex) {
-      logger.warn("error in directory reconciliation", ex);
+    } catch (Throwable t) {
+      logger.warn("error in directory reconciliation: ", t);
     }
 
-    scheduleWithJitter(scheduleDelayMs);
+    return delayMs;
   }
 
-  private long getTimeUntilNextInterval(Instant nextIntervalTime) {
-    long nextInterval = Duration.between(Instant.now(), nextIntervalTime).get(ChronoUnit.MILLIS);
-    return getBoundedChunkInterval(nextInterval);
+  private synchronized boolean sleepWhileRunning(long delayMs) {
+    long startTimeMs = System.currentTimeMillis();
+    while (running && delayMs > 0) {
+      Util.wait(this, delayMs);
+
+      long nowMs = System.currentTimeMillis();
+      delayMs -= Math.abs(nowMs - startTimeMs);
+    }
+    return running;
+  }
+
+  private long getTimeUntilNextInterval(long nextIntervalTimeMs) {
+    long nextIntervalMs = System.currentTimeMillis() - nextIntervalTimeMs;
+    return getBoundedChunkInterval(nextIntervalMs);
   }
 
   private long getBoundedChunkInterval(long intervalMs) {
     return Math.max(Math.min(intervalMs, MAXIMUM_CHUNK_INTERVAL), MINIMUM_CHUNK_INTERVAL);
   }
 
-  private void scheduleWithJitter(long delayMs) {
+  private long getDelayWithJitter(long delayMs) {
     long randomJitterMs = (long) (random.nextDouble() * JITTER_MAX * delayMs);
-    try {
-      executor.schedule(this, delayMs + randomJitterMs, TimeUnit.MILLISECONDS);
-    } catch (RejectedExecutionException ex) {
-      logger.info("reconciler shutting down");
-    }
+    return delayMs + randomJitterMs;
   }
 
   private boolean processChunk() {
