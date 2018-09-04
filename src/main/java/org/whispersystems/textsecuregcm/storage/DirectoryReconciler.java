@@ -100,7 +100,13 @@ public class DirectoryReconciler implements Managed, Runnable {
     long delayMs = DEFAULT_CHUNK_INTERVAL;
 
     while (sleepWhileRunning(getDelayWithJitter(delayMs))) {
-      delayMs = doPeriodicWork();
+      try {
+        delayMs = DEFAULT_CHUNK_INTERVAL;
+        delayMs = getBoundedChunkInterval(PERIOD * getAccountCount() / CHUNK_SIZE);
+        delayMs = doPeriodicWork(delayMs);
+      } catch (Throwable t) {
+        logger.warn("error in directory reconciliation: ", t);
+      }
     }
 
     synchronized (this) {
@@ -110,30 +116,34 @@ public class DirectoryReconciler implements Managed, Runnable {
   }
 
   @VisibleForTesting
-  public long doPeriodicWork() {
-    long delayMs = DEFAULT_CHUNK_INTERVAL;
+  public long doPeriodicWork(long intervalMs) {
+    long nextIntervalTimeMs = System.currentTimeMillis() + intervalMs;
 
-    try {
-      long intervalMs         = getBoundedChunkInterval(PERIOD * getAccountCount() / CHUNK_SIZE);
-      long nextIntervalTimeMs = System.currentTimeMillis() + intervalMs;
-
-      delayMs = intervalMs;
-
-      if (reconciliationCache.claimActiveWork(workerId, WORKER_TTL_MS)) {
-        if (processChunk()) {
-          if (!reconciliationCache.isAccelerated()) {
-            delayMs = getTimeUntilNextInterval(nextIntervalTimeMs);
-            reconciliationCache.claimActiveWork(workerId, delayMs);
-          } else {
-            delayMs = MINIMUM_CHUNK_INTERVAL;
-          }
+    if (reconciliationCache.claimActiveWork(workerId, WORKER_TTL_MS)) {
+      if (processChunk()) {
+        if (!reconciliationCache.isAccelerated()) {
+          long timeUntilNextIntervalMs = getTimeUntilNextInterval(nextIntervalTimeMs);
+          reconciliationCache.claimActiveWork(workerId, timeUntilNextIntervalMs);
+          return timeUntilNextIntervalMs;
+        } else {
+          return MINIMUM_CHUNK_INTERVAL;
         }
       }
-    } catch (Throwable t) {
-      logger.warn("error in directory reconciliation: ", t);
+    }
+    return intervalMs;
+  }
+
+  @VisibleForTesting
+  public long getAccountCount() {
+    Optional<Long> cachedCount = reconciliationCache.getCachedAccountCount();
+
+    if (cachedCount.isPresent()) {
+      return cachedCount.get();
     }
 
-    return delayMs;
+    long count = accountsManager.getCount();
+    reconciliationCache.setCachedAccountCount(count);
+    return count;
   }
 
   private synchronized boolean sleepWhileRunning(long delayMs) {
@@ -211,20 +221,6 @@ public class DirectoryReconciler implements Managed, Runnable {
       logger.warn("request error: ", ex);
       throw new ProcessingException(ex);
     }
-  }
-
-
-
-  private long getAccountCount() {
-    Optional<Long> cachedCount = reconciliationCache.getCachedAccountCount();
-
-    if (cachedCount.isPresent()) {
-      return cachedCount.get();
-    }
-
-    long count = accountsManager.getCount();
-    reconciliationCache.setCachedAccountCount(count);
-    return count;
   }
 
 }
