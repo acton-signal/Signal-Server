@@ -16,7 +16,6 @@
  */
 package org.whispersystems.textsecuregcm.storage;
 
-import com.google.common.base.Optional;
 import org.bouncycastle.openssl.PEMReader;
 import org.glassfish.jersey.SslConfigurator;
 import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
@@ -24,11 +23,11 @@ import org.whispersystems.textsecuregcm.configuration.DirectoryServerConfigurati
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationResponse;
 
+import javax.net.ssl.SSLContext;
 import javax.ws.rs.client.Client;
 import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -50,15 +49,24 @@ public class DirectoryReconciliationClient {
     this.client         = initializeClient(directoryServerConfiguration);
   }
 
+  public DirectoryReconciliationResponse sendChunk(DirectoryReconciliationRequest request) {
+    return client.target(replicationUrl)
+                 .path("/v1/directory/reconcile")
+                 .request(MediaType.APPLICATION_JSON_TYPE)
+                 .put(Entity.json(request), DirectoryReconciliationResponse.class);
+  }
+
   private static Client initializeClient(DirectoryServerConfiguration directoryServerConfiguration)
       throws CertificateException
   {
-    SslConfigurator sslConfig = SslConfigurator.newInstance()
-                                               .securityProtocol("TLSv1.2");
-    sslConfig.trustStore(initializeKeyStore(directoryServerConfiguration.getReplicationCaCertificate()));
+    KeyStore   trustStore = initializeKeyStore(directoryServerConfiguration.getReplicationCaCertificate());
+    SSLContext sslContext = SslConfigurator.newInstance()
+                                           .securityProtocol("TLSv1.2")
+                                           .trustStore(trustStore)
+                                           .createSSLContext();
     return ClientBuilder.newBuilder()
                         .register(HttpAuthenticationFeature.basic("signal", directoryServerConfiguration.getReplicationPassword().getBytes()))
-                        .sslContext(sslConfig.createSSLContext())
+                        .sslContext(sslContext)
                         .build();
   }
 
@@ -82,13 +90,6 @@ public class DirectoryReconciliationClient {
     } catch (NoSuchAlgorithmException ex) {
       throw new AssertionError(ex);
     }
-  }
-
-  public DirectoryReconciliationResponse sendChunk(DirectoryReconciliationRequest request) {
-    return client.target(replicationUrl)
-                 .path("/v1/directory/reconcile")
-                 .request(MediaType.APPLICATION_JSON_TYPE)
-                 .put(Entity.json(request), DirectoryReconciliationResponse.class);
   }
 
 }
