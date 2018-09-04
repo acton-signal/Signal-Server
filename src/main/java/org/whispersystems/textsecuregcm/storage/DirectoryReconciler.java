@@ -148,7 +148,7 @@ public class DirectoryReconciler implements Managed, Runnable {
   }
 
   private long getTimeUntilNextInterval(long nextIntervalTimeMs) {
-    long nextIntervalMs = System.currentTimeMillis() - nextIntervalTimeMs;
+    long nextIntervalMs = nextIntervalTimeMs - System.currentTimeMillis();
     return getBoundedChunkInterval(nextIntervalMs);
   }
 
