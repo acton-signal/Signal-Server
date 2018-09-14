@@ -66,7 +66,7 @@ public abstract class Accounts {
   abstract Account get(@Bind("number") String number);
 
   @SqlQuery("SELECT COUNT(DISTINCT " + NUMBER + ") from accounts")
-  abstract long getCount();
+  public abstract long getCount();
 
   @Mapper(AccountMapper.class)
   @SqlQuery("SELECT * FROM accounts OFFSET :offset LIMIT :limit")

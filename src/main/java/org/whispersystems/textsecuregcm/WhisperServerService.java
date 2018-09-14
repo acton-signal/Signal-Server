@@ -153,15 +153,17 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.getObjectMapper().setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.NONE);
     environment.getObjectMapper().setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY);
 
-    DBIFactory dbiFactory = new DBIFactory();
-    DBI        database   = dbiFactory.build(environment, config.getDataSourceFactory(), "accountdb");
-    DBI        messagedb  = dbiFactory.build(environment, config.getMessageStoreConfiguration(), "messagedb");
+    DBIFactory dbiFactory       = new DBIFactory();
+    DBI        database         = dbiFactory.build(environment, config.getDataSourceFactory(), "accountdb");
+    DBI        readOnlyDatabase = dbiFactory.build(environment, config.getReadDataSourceFactory(), "accountdb");
+    DBI        messagedb        = dbiFactory.build(environment, config.getMessageStoreConfiguration(), "messagedb");
 
-    Accounts        accounts        = database.onDemand(Accounts.class);
-    PendingAccounts pendingAccounts = database.onDemand(PendingAccounts.class);
-    PendingDevices  pendingDevices  = database.onDemand(PendingDevices.class);
-    Keys            keys            = database.onDemand(Keys.class);
-    Messages        messages        = messagedb.onDemand(Messages.class);
+    Accounts        accounts         = database.onDemand(Accounts.class);
+    Accounts        readOnlyAccounts = readOnlyDatabase.onDemand(Accounts.class);
+    PendingAccounts pendingAccounts  = database.onDemand(PendingAccounts.class);
+    PendingDevices  pendingDevices   = database.onDemand(PendingDevices.class);
+    Keys            keys             = database.onDemand(Keys.class);
+    Messages        messages         = messagedb.onDemand(Messages.class);
 
     RedisClientFactory cacheClientFactory         = new RedisClientFactory(config.getCacheConfiguration().getUrl(), config.getCacheConfiguration().getReplicaUrls()                                                              );
     RedisClientFactory directoryClientFactory     = new RedisClientFactory(config.getDirectoryConfiguration().getRedisConfiguration().getUrl(), config.getDirectoryConfiguration().getRedisConfiguration().getReplicaUrls()      );
@@ -204,7 +206,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
                                                                                                     config.getDirectoryConfiguration().getDirectoryClientConfiguration().getUserAuthenticationTokenUserIdSecret());
     DirectoryReconciliationCache  directoryReconciliationCache  = new DirectoryReconciliationCache(cacheClient);
     DirectoryReconciliationClient directoryReconciliationClient = new DirectoryReconciliationClient(config.getDirectoryConfiguration().getDirectoryServerConfiguration());
-    DirectoryReconciler           directoryReconciler           = new DirectoryReconciler(directoryReconciliationClient, directoryReconciliationCache, directory, accountsManager);
+    DirectoryReconciler           directoryReconciler           = new DirectoryReconciler(directoryReconciliationClient, directoryReconciliationCache, directory, readOnlyAccounts);
 
     messagesCache.setPubSubManager(pubSubManager, pushSender);
 

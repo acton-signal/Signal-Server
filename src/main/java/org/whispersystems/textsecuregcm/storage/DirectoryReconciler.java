@@ -58,7 +58,7 @@ public class DirectoryReconciler implements Managed, Runnable {
   private static final int    CHUNK_SIZE             = 10000;
   private static final double JITTER_MAX             = 0.20;
 
-  private final AccountsManager               accountsManager;
+  private final Accounts                      readOnlyAccounts;
   private final DirectoryManager              directoryManager;
   private final DirectoryReconciliationClient reconciliationClient;
   private final DirectoryReconciliationCache  reconciliationCache;
@@ -71,8 +71,8 @@ public class DirectoryReconciler implements Managed, Runnable {
   public DirectoryReconciler(DirectoryReconciliationClient reconciliationClient,
                              DirectoryReconciliationCache reconciliationCache,
                              DirectoryManager directoryManager,
-                             AccountsManager accountsManager) {
-    this.accountsManager      = accountsManager;
+                             Accounts readOnlyAccounts) {
+    this.readOnlyAccounts     = readOnlyAccounts;
     this.directoryManager     = directoryManager;
     this.reconciliationClient = reconciliationClient;
     this.reconciliationCache  = reconciliationCache;
@@ -147,7 +147,7 @@ public class DirectoryReconciler implements Managed, Runnable {
       return cachedCount.get();
     }
 
-    long count = accountsManager.getCount();
+    long count = readOnlyAccounts.getCount();
     reconciliationCache.setCachedAccountCount(count);
     return count;
   }
@@ -178,13 +178,13 @@ public class DirectoryReconciler implements Managed, Runnable {
   }
 
   private boolean processChunk() {
-    Optional<String>                fromNumber          = reconciliationCache.getLastNumber();
-    List<Account>                   accounts            = readChunk(fromNumber, CHUNK_SIZE);
+    Optional<String> fromNumber    = reconciliationCache.getLastNumber();
+    List<Account>    chunkAccounts = readChunk(fromNumber, CHUNK_SIZE);
 
-    writeChunktoDirectoryCache(accounts);
+    writeChunktoDirectoryCache(chunkAccounts);
 
-    DirectoryReconciliationRequest  request             = createChunkRequest(fromNumber, accounts);
-    DirectoryReconciliationResponse sendChunkResponse   = sendChunk(request);
+    DirectoryReconciliationRequest  request           = createChunkRequest(fromNumber, chunkAccounts);
+    DirectoryReconciliationResponse sendChunkResponse = sendChunk(request);
 
     if (sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.MISSING ||
         request.getToNumber() == null) {
@@ -202,11 +202,15 @@ public class DirectoryReconciler implements Managed, Runnable {
 
   private List<Account> readChunk(Optional<String> fromNumber, int chunkSize) {
     try (Timer.Context timer = readChunkTimer.time()) {
-      List<Account> accounts = accountsManager.getAllFrom(fromNumber, chunkSize);
-      if (accounts == null) {
-        return Collections.emptyList();
+      Optional<List<Account>> chunkAccounts;
+
+      if (fromNumber.isPresent()) {
+        chunkAccounts = Optional.fromNullable(readOnlyAccounts.getAllFrom(fromNumber.get(), chunkSize));
+      } else {
+        chunkAccounts = Optional.fromNullable(readOnlyAccounts.getAllFrom(chunkSize));
       }
-      return accounts;
+
+      return chunkAccounts.or(Collections::emptyList);
     }
   }
 
