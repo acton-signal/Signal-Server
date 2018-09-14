@@ -25,14 +25,17 @@ import com.google.common.base.Optional;
 import io.dropwizard.lifecycle.Managed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.whispersystems.textsecuregcm.entities.ClientContact;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationResponse;
+import org.whispersystems.textsecuregcm.storage.DirectoryManager.BatchOperationHandle;
 import org.whispersystems.textsecuregcm.util.Constants;
 import org.whispersystems.textsecuregcm.util.Hex;
 import org.whispersystems.textsecuregcm.util.Util;
 
 import javax.ws.rs.ProcessingException;
 import java.security.SecureRandom;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -56,6 +59,7 @@ public class DirectoryReconciler implements Managed, Runnable {
   private static final double JITTER_MAX             = 0.20;
 
   private final AccountsManager               accountsManager;
+  private final DirectoryManager              directoryManager;
   private final DirectoryReconciliationClient reconciliationClient;
   private final DirectoryReconciliationCache  reconciliationCache;
   private final String                        workerId;
@@ -66,8 +70,10 @@ public class DirectoryReconciler implements Managed, Runnable {
 
   public DirectoryReconciler(DirectoryReconciliationClient reconciliationClient,
                              DirectoryReconciliationCache reconciliationCache,
+                             DirectoryManager directoryManager,
                              AccountsManager accountsManager) {
     this.accountsManager      = accountsManager;
+    this.directoryManager     = directoryManager;
     this.reconciliationClient = reconciliationClient;
     this.reconciliationCache  = reconciliationCache;
     this.random               = new SecureRandom();
@@ -173,7 +179,11 @@ public class DirectoryReconciler implements Managed, Runnable {
 
   private boolean processChunk() {
     Optional<String>                fromNumber          = reconciliationCache.getLastNumber();
-    DirectoryReconciliationRequest  request             = readChunk(fromNumber, CHUNK_SIZE);
+    List<Account>                   accounts            = readChunk(fromNumber, CHUNK_SIZE);
+
+    writeChunktoDirectoryCache(accounts);
+
+    DirectoryReconciliationRequest  request             = createChunkRequest(fromNumber, accounts);
     DirectoryReconciliationResponse sendChunkResponse   = sendChunk(request);
 
     if (sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.MISSING ||
@@ -190,22 +200,50 @@ public class DirectoryReconciler implements Managed, Runnable {
     return sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.OK;
   }
 
-  private DirectoryReconciliationRequest readChunk(Optional<String> fromNumber, int chunkSize) {
+  private List<Account> readChunk(Optional<String> fromNumber, int chunkSize) {
     try (Timer.Context timer = readChunkTimer.time()) {
       List<Account> accounts = accountsManager.getAllFrom(fromNumber, chunkSize);
-
-      List<String> numbers = accounts.stream()
-                                     .filter(Account::isActive)
-                                     .map(Account::getNumber)
-                                     .collect(Collectors.toList());
-
-      Optional<String> toNumber = Optional.absent();
-      if (!accounts.isEmpty()) {
-        toNumber = Optional.of(accounts.get(accounts.size() - 1).getNumber());
+      if (accounts == null) {
+        return Collections.emptyList();
       }
-
-      return new DirectoryReconciliationRequest(fromNumber.orNull(), toNumber.orNull(), numbers);
+      return accounts;
     }
+  }
+
+  private void writeChunktoDirectoryCache(List<Account> accounts) {
+    if (accounts.isEmpty()) {
+      return;
+    }
+
+    BatchOperationHandle batchOperation = directoryManager.startBatchOperation();
+    try {
+      for (Account account : accounts) {
+        if (account.isActive()) {
+          byte[]        token         = Util.getContactToken(account.getNumber());
+          ClientContact clientContact = new ClientContact(token, null, account.isVoiceSupported(), account.isVideoSupported());
+
+          directoryManager.add(batchOperation, clientContact);
+        } else {
+          directoryManager.remove(batchOperation, account.getNumber());
+        }
+      }
+    } finally {
+      directoryManager.stopBatchOperation(batchOperation);
+    }
+  }
+
+  private DirectoryReconciliationRequest createChunkRequest(Optional<String> fromNumber, List<Account> accounts) {
+    List<String> numbers = accounts.stream()
+                                   .filter(Account::isActive)
+                                   .map(Account::getNumber)
+                                   .collect(Collectors.toList());
+
+    Optional<String> toNumber = Optional.absent();
+    if (!accounts.isEmpty()) {
+      toNumber = Optional.of(accounts.get(accounts.size() - 1).getNumber());
+    }
+
+    return new DirectoryReconciliationRequest(fromNumber.orNull(), toNumber.orNull(), numbers);
   }
 
   private DirectoryReconciliationResponse sendChunk(DirectoryReconciliationRequest request) {
