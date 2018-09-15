@@ -50,13 +50,14 @@ public class DirectoryReconciler implements Managed, Runnable {
   private static final Timer          sendChunkTimer      = metricRegistry.timer(name(DirectoryReconciler.class, "sendChunk"));
   private static final Meter          sendChunkErrorMeter = metricRegistry.meter(name(DirectoryReconciler.class, "sendChunkError"));
 
-  private static final long   WORKER_TTL_MS          = 120_000L;
-  private static final long   PERIOD                 = 86400_000L;
-  private static final long   MAXIMUM_CHUNK_INTERVAL = 120_000L;
-  private static final long   DEFAULT_CHUNK_INTERVAL = 60_000L;
-  private static final long   MINIMUM_CHUNK_INTERVAL = 500L;
-  private static final int    CHUNK_SIZE             = 10000;
-  private static final double JITTER_MAX             = 0.20;
+  private static final long   WORKER_TTL_MS              = 120_000L;
+  private static final long   PERIOD                     = 86400_000L;
+  private static final long   MAXIMUM_CHUNK_INTERVAL     = 30_000L;
+  private static final long   DEFAULT_CHUNK_INTERVAL     = 10_000L;
+  private static final long   MINIMUM_CHUNK_INTERVAL     = 500L;
+  private static final long   ACCELERATED_CHUNK_INTERVAL = 10L;
+  private static final int    CHUNK_SIZE                 = 1000;
+  private static final double JITTER_MAX                 = 0.20;
 
   private final Accounts                      readOnlyAccounts;
   private final DirectoryManager              directoryManager;
@@ -108,7 +109,7 @@ public class DirectoryReconciler implements Managed, Runnable {
     while (sleepWhileRunning(getDelayWithJitter(delayMs))) {
       try {
         delayMs = DEFAULT_CHUNK_INTERVAL;
-        delayMs = getBoundedChunkInterval(PERIOD * getAccountCount() / CHUNK_SIZE);
+        delayMs = getBoundedChunkInterval(PERIOD * CHUNK_SIZE / getAccountCount());
         delayMs = doPeriodicWork(delayMs);
       } catch (Throwable t) {
         logger.warn("error in directory reconciliation: ", t);
@@ -132,7 +133,7 @@ public class DirectoryReconciler implements Managed, Runnable {
           reconciliationCache.claimActiveWork(workerId, timeUntilNextIntervalMs);
           return timeUntilNextIntervalMs;
         } else {
-          return MINIMUM_CHUNK_INTERVAL;
+          return ACCELERATED_CHUNK_INTERVAL;
         }
       }
     }
