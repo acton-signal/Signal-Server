@@ -111,8 +111,6 @@ public class WhisperServerConfiguration extends Configuration {
   @JsonProperty
   private DataSourceFactory database = new DataSourceFactory();
 
-  @Valid
-  @NotNull
   @JsonProperty
   private DataSourceFactory read_database;
 
