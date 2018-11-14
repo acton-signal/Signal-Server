@@ -82,6 +82,7 @@ import javax.servlet.FilterRegistration;
 import javax.servlet.ServletRegistration;
 import java.security.Security;
 import java.util.EnumSet;
+import java.util.LinkedList;
 import java.util.Optional;
 
 import static com.codahale.metrics.MetricRegistry.name;
@@ -189,8 +190,23 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
                                                                                           config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkSize(),
                                                                                           config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkIntervalMs());
 
-    ActiveUserCache   activeUserCache    = new ActiveUserCache(cacheClient);
-    ActiveUserCounter activeUserCounter  = new ActiveUserCounter(config.getMetricsFactory(), accounts, activeUserCache);
+    ActiveUserCounter activeUserCounter =
+      new ActiveUserCounter(config.getMetricsFactory(), cacheClient);
+
+    LinkedList<AccountDatabaseCrawlerListener> accountDatabaseCrawlerListeners =
+      new LinkedList<AccountDatabaseCrawlerListener>();
+
+    accountDatabaseCrawlerListeners.add(activeUserCounter);
+    
+    AccountDatabaseCrawlerCache accountDatabaseCrawlerCache =
+      new AccountDatabaseCrawlerCache(cacheClient);
+
+    AccountDatabaseCrawler accountDatabaseCrawler =
+      new AccountDatabaseCrawler(accounts,
+                                 accountDatabaseCrawlerCache,
+                                 accountDatabaseCrawlerListeners,
+                                 config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkSize(),
+                                 config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkIntervalMs());
 
     messagesCache.setPubSubManager(pubSubManager, pushSender);
 
@@ -200,7 +216,7 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.lifecycle().manage(pushSender);
     environment.lifecycle().manage(messagesCache);
     environment.lifecycle().manage(directoryReconciler);
-    environment.lifecycle().manage(activeUserCounter);
+    environment.lifecycle().manage(accountDatabaseCrawler);
 
     AttachmentController attachmentController = new AttachmentController(rateLimiters, urlSigner);
     KeysController       keysController       = new KeysController(rateLimiters, keys, accountsManager);

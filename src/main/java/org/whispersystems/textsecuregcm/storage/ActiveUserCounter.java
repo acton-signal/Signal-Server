@@ -21,13 +21,14 @@ import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.SharedMetricRegistries;
 import com.codahale.metrics.Timer;
 import com.google.common.annotations.VisibleForTesting;
-import io.dropwizard.lifecycle.Managed;
 import io.dropwizard.metrics.MetricsFactory;
 import io.dropwizard.metrics.ReporterFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.whispersystems.textsecuregcm.redis.ReplicatedJedisPool;
 import org.whispersystems.textsecuregcm.util.Constants;
 import org.whispersystems.textsecuregcm.util.Util;
+import redis.clients.jedis.Jedis;
 
 import java.security.SecureRandom;
 import java.text.ParseException;
@@ -42,137 +43,71 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-public class ActiveUserCounter implements Managed, Runnable {
+public class ActiveUserCounter implements AccountDatabaseCrawlerListener {
 
-  private static final long   WORKER_TTL_MS       = 120_000L;
-  private static final int    JITTER_BASE_MS      = 25_000;
-  private static final int    JITTER_VARIATION_MS = 10_000;
-  private static final int    CHUNK_SIZE          = 16_384;
-  private static final String INITIAL_NUMBER      = "+";
-  private static final int    INITIAL_DATE        = 2000_01_01;
+  private static final Logger logger = LoggerFactory.getLogger(ActiveUserCounter.class);
 
-  private static final Logger         logger         = LoggerFactory.getLogger(ActiveUserCounter.class);
-  private static final MetricRegistry metricRegistry = SharedMetricRegistries.getOrCreate(Constants.METRICS_NAME);
-  private static final Timer          readChunkTimer = metricRegistry.timer(MetricRegistry.name(ActiveUserCounter.class, "readChunk"));
-
+  private static final String PREFIX           = "active_user_";
+  
   private static final String PLATFORM_IOS     = "ios";
   private static final String PLATFORM_ANDROID = "android";
 
   private static final String PLATFORMS[] = {PLATFORM_IOS, PLATFORM_ANDROID};
   private static final String INTERVALS[] = {"daily", "weekly", "monthly", "quarterly", "yearly"};
 
-  private final MetricsFactory  metricsFactory;
-  private final Accounts        accounts;
-  private final ActiveUserCache activeUserCache;
-  private final String          workerId;
-  private final SecureRandom    random;
+  private final MetricsFactory      metricsFactory;
+  private final ReplicatedJedisPool jedisPool;
 
-  private boolean running;
-  private boolean finished;
-
-  public ActiveUserCounter(MetricsFactory metricsFactory, Accounts accounts, ActiveUserCache activeUserCache) {
+  public ActiveUserCounter(MetricsFactory metricsFactory, ReplicatedJedisPool jedisPool) {
     this.metricsFactory  = metricsFactory;
-    this.accounts        = accounts;
-    this.activeUserCache = activeUserCache;
-    this.random          = new SecureRandom();
-    this.workerId        = UUID.randomUUID().toString();
+    this.jedisPool       = jedisPool;
   }
 
-  @Override
-  public synchronized void start() {
-    running = true;
-    new Thread(this).start();
-  }
-
-  @Override
-  public synchronized void stop() {
-    running = false;
-    notifyAll();
-    while (!finished) {
-      Util.wait(this);
-    }
-  }
-
-  @Override
-  public void run() {
-    int     lastDate   = INITIAL_DATE;
-    boolean doMoreWork = true;
-
-    while (sleepWhileRunning(getDelayWithJitter())) {
-      int today = getDateOfToday();
-
-      if (today > lastDate) {
-        lastDate = today;
-        doMoreWork = true;
-      }
-
-      if (doMoreWork) {
-        try {
-          doMoreWork = doPeriodicWork(today);
-        } catch (Throwable t) {
-          logger.warn("error in active user count: ", t);
+  public void onCrawlStart() {
+    try (Jedis jedis = jedisPool.getWriteResource()) {
+      for (String platform : PLATFORMS) {
+        for (String interval : INTERVALS) {
+          jedis.set(tallyKey(platform, interval), "0");
         }
-      } else {
-        logger.debug("run: no work available");
       }
     }
-
-    synchronized (this) {
-      finished = true;
-      notifyAll();
-    }
   }
 
-  @VisibleForTesting
-  public boolean doPeriodicWork(int today) {
+  public void onCrawlChunk(List<Account> chunkAccounts) {
+    long nowDays  = TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis());
+    long agoMs[]  = {TimeUnit.DAYS.toMillis(nowDays - 1),
+                     TimeUnit.DAYS.toMillis(nowDays - 7),
+                     TimeUnit.DAYS.toMillis(nowDays - 30),
+                     TimeUnit.DAYS.toMillis(nowDays - 90),
+                     TimeUnit.DAYS.toMillis(nowDays - 365)};
+    long ios[]     = {0, 0, 0, 0, 0};
+    long android[] = {0, 0, 0, 0, 0};
 
-    if (activeUserCache.claimActiveWorker(workerId, WORKER_TTL_MS)) {
-      try {
-        long startTimeMs = System.currentTimeMillis();
-        Optional<String> number = activeUserCache.getLastNumberVisited();
-        int date = activeUserCache.getDateToReport(INITIAL_DATE);
+    for (Account account : chunkAccounts) {
 
-        if (today > date) {
-          logger.info(date + " started");
-          date = today;
-          number = Optional.of(INITIAL_NUMBER);
-          activeUserCache.setLastNumberVisited(number);
-          activeUserCache.setDateToReport(date);
-          activeUserCache.resetTallies(PLATFORMS, INTERVALS);
-        }
+      Optional<Device> device = account.getMasterDevice();
 
-        if (!number.isPresent()) return false;
-        number = processChunk(date, number.get(), CHUNK_SIZE);
-        activeUserCache.setLastNumberVisited(number);
+      if (!device.isPresent()) continue;
 
-        if (!number.isPresent()) {
-          logger.info(date + " completed");
-          registerMetrics();
-          return false;
-        }
+      long lastActiveMs = device.get().getLastSeen();
 
-        long endTimeMs = System.currentTimeMillis();
-        long sleepInterval = getDelayWithJitter() - (endTimeMs - startTimeMs);
-        if (sleepInterval > 0) sleepWhileRunning(sleepInterval);
-
-      } finally {
-        activeUserCache.releaseActiveWorker(workerId);
+      if (device.get().getApnId() != null) {
+        for (int i = 0; i < agoMs.length; i++)
+          if (lastActiveMs > agoMs[i]) ios[i]++;
+      } else if (device.get().getGcmId() != null) {
+        for (int i = 0; i < agoMs.length; i++)
+          if (lastActiveMs > agoMs[i]) android[i]++;
       }
     }
-    return true;
+    incrementTallies(PLATFORM_IOS, INTERVALS, ios);
+    incrementTallies(PLATFORM_ANDROID, INTERVALS, android);
   }
 
-  @VisibleForTesting
-  public int getDateOfToday() {
-    ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
-    return Integer.valueOf(now.format(DateTimeFormatter.ofPattern("yyyyMMdd")));
-  }
-
-  private void registerMetrics() {
+  public void onCrawlEnd() {
     MetricRegistry metrics = new MetricRegistry();
     long intervalTallies[] = new long[INTERVALS.length];
     for (String platform : PLATFORMS) {
-      long platformTallies[] = activeUserCache.getFinalTallies(platform, INTERVALS);
+      long platformTallies[] = getFinalTallies(platform);
       for (int i = 0; i < INTERVALS.length; i++) {
         final long tally = platformTallies[i];
         logger.info(metricKey(platform, INTERVALS[i]) + " " + tally);
@@ -199,71 +134,36 @@ public class ActiveUserCounter implements Managed, Runnable {
     }
   }
 
-  private String metricKey(String platform, String interval) {
-    return MetricRegistry.name(ActiveUserCounter.class, interval + "_active_" + platform);
-  }
-
-  private String metricKey(String interval) {
-    return MetricRegistry.name(ActiveUserCounter.class, interval + "_active");
-  }
-
-  private synchronized boolean sleepWhileRunning(long delayMs) {
-    if (running) Util.wait(this, delayMs);
-    return running;
-  }
-
-  private long getDelayWithJitter() {
-    return (long) (JITTER_BASE_MS + random.nextDouble() * JITTER_VARIATION_MS);
-  }
-
-  private Optional<String> processChunk(int date, String number, int count) {
-    logger.debug("processChunk date=" + date + " number=" + number + " count=" + count);
-    String lastNumber = null;
-    long nowDays  = TimeUnit.MILLISECONDS.toDays(getDateMidnightMs(date));
-    long agoMs[]  = {TimeUnit.DAYS.toMillis(nowDays - 1),
-                     TimeUnit.DAYS.toMillis(nowDays - 7),
-                     TimeUnit.DAYS.toMillis(nowDays - 30),
-                     TimeUnit.DAYS.toMillis(nowDays - 90),
-                     TimeUnit.DAYS.toMillis(nowDays - 365)};
-    long ios[]     = {0, 0, 0, 0, 0};
-    long android[] = {0, 0, 0, 0, 0};
-
-    List<Account> chunkAccounts = readChunk(number, count);
-    for (Account account : chunkAccounts) {
-      lastNumber = account.getNumber();
-
-      Optional<Device> device = account.getMasterDevice();
-
-      if (!device.isPresent()) continue;
-
-      long lastActiveMs = device.get().getLastSeen();
-
-      if (device.get().getApnId() != null) {
-        for (int i = 0; i < agoMs.length; i++)
-          if (lastActiveMs > agoMs[i]) ios[i]++;
-      } else if (device.get().getGcmId() != null) {
-        for (int i = 0; i < agoMs.length; i++)
-          if (lastActiveMs > agoMs[i]) android[i]++;
+  private void incrementTallies(String platform, String intervals[], long tallies[]) {
+    try (Jedis jedis = jedisPool.getWriteResource()) {
+      for (int i = 0; i < intervals.length; i++) {
+        if (tallies[i] > 0) {
+          jedis.incrBy(tallyKey(platform, intervals[i]), tallies[i]);
+        }
       }
     }
-    activeUserCache.incrementTallies(PLATFORM_IOS, INTERVALS, ios);
-    activeUserCache.incrementTallies(PLATFORM_ANDROID, INTERVALS, android);
-    return Optional.ofNullable(lastNumber);
   }
 
-  private List<Account> readChunk(String number, int count) {
-    try (Timer.Context timer = readChunkTimer.time()) {
-      return accounts.getAllFrom(number, count);
+  private long[] getFinalTallies(String platform) {
+    try (Jedis jedis = jedisPool.getReadResource()) {
+      long tallies[] = new long[INTERVALS.length];
+      for (int i = 0; i < INTERVALS.length; i++) {
+        tallies[i] = Long.valueOf(jedis.get(tallyKey(platform, INTERVALS[i])));
+      }
+      return tallies;
     }
   }
 
-  private long getDateMidnightMs(int date) {
-    SimpleDateFormat format = new SimpleDateFormat("yyyyMMddz");
-    try {
-      return format.parse(date + "UTC").getTime();
-    } catch (ParseException e) {
-      throw new AssertionError("unexpected: " + date);
-    }
+  private String tallyKey(String platform, String intervalName) {
+    return PREFIX + platform + "_tally_" + intervalName;
+  }
+
+  private String metricKey(String platform, String intervalName) {
+    return MetricRegistry.name(ActiveUserCounter.class, intervalName + "_active_" + platform);
+  }
+
+  private String metricKey(String intervalName) {
+    return MetricRegistry.name(ActiveUserCounter.class, intervalName + "_active");
   }
 
 }
