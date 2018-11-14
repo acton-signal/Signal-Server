@@ -190,23 +190,13 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
                                                                                           config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkSize(),
                                                                                           config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkIntervalMs());
 
-    ActiveUserCounter activeUserCounter =
-      new ActiveUserCounter(config.getMetricsFactory(), cacheClient);
-
-    LinkedList<AccountDatabaseCrawlerListener> accountDatabaseCrawlerListeners =
-      new LinkedList<AccountDatabaseCrawlerListener>();
+    ActiveUserCounter                          activeUserCounter               = new ActiveUserCounter(config.getMetricsFactory(), cacheClient);
+    LinkedList<AccountDatabaseCrawlerListener> accountDatabaseCrawlerListeners = new LinkedList<AccountDatabaseCrawlerListener>();
 
     accountDatabaseCrawlerListeners.add(activeUserCounter);
     
-    AccountDatabaseCrawlerCache accountDatabaseCrawlerCache =
-      new AccountDatabaseCrawlerCache(cacheClient);
-
-    AccountDatabaseCrawler accountDatabaseCrawler =
-      new AccountDatabaseCrawler(accounts,
-                                 accountDatabaseCrawlerCache,
-                                 accountDatabaseCrawlerListeners,
-                                 config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkSize(),
-                                 config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkIntervalMs());
+    AccountDatabaseCrawlerCache accountDatabaseCrawlerCache = new AccountDatabaseCrawlerCache(cacheClient);
+    AccountDatabaseCrawler      accountDatabaseCrawler      = new AccountDatabaseCrawler(accounts, accountDatabaseCrawlerCache, accountDatabaseCrawlerListeners, config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkSize(), config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkIntervalMs());
 
     messagesCache.setPubSubManager(pubSubManager, pushSender);
 
