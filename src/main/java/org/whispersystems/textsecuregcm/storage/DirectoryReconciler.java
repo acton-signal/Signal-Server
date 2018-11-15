@@ -28,147 +28,44 @@ import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationRequest;
 import org.whispersystems.textsecuregcm.entities.DirectoryReconciliationResponse;
 import org.whispersystems.textsecuregcm.storage.DirectoryManager.BatchOperationHandle;
 import org.whispersystems.textsecuregcm.util.Constants;
-import org.whispersystems.textsecuregcm.util.Hex;
 import org.whispersystems.textsecuregcm.util.Util;
 
 import javax.ws.rs.ProcessingException;
-import java.security.SecureRandom;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static com.codahale.metrics.MetricRegistry.name;
-import io.dropwizard.lifecycle.Managed;
 
-@SuppressWarnings("OptionalUsedAsFieldOrParameterType")
-public class DirectoryReconciler implements Managed, Runnable {
+public class DirectoryReconciler implements AccountDatabaseCrawlerListener {
 
   private static final Logger logger = LoggerFactory.getLogger(DirectoryReconciler.class);
 
   private static final MetricRegistry metricRegistry      = SharedMetricRegistries.getOrCreate(Constants.METRICS_NAME);
-  private static final Timer          readChunkTimer      = metricRegistry.timer(name(DirectoryReconciler.class, "readChunk"));
   private static final Timer          sendChunkTimer      = metricRegistry.timer(name(DirectoryReconciler.class, "sendChunk"));
   private static final Meter          sendChunkErrorMeter = metricRegistry.meter(name(DirectoryReconciler.class, "sendChunkError"));
 
-  private static final long   WORKER_TTL_MS              = 120_000L;
-  private static final long   MINIMUM_CHUNK_INTERVAL     = 500L;
-  private static final long   ACCELERATED_CHUNK_INTERVAL = 10L;
-  private static final double JITTER_MAX                 = 0.20;
-
-  private final Accounts                      accounts;
   private final DirectoryManager              directoryManager;
   private final DirectoryReconciliationClient reconciliationClient;
-  private final DirectoryReconciliationCache  reconciliationCache;
-  private final int                           chunkSize;
-  private final long                          chunkIntervalMs;
-  private final String                        workerId;
 
-  private boolean running;
-  private boolean finished;
-
-  public DirectoryReconciler(DirectoryReconciliationClient reconciliationClient,
-                             DirectoryReconciliationCache reconciliationCache,
-                             DirectoryManager directoryManager,
-                             Accounts accounts,
-                             int chunkSize,
-                             long chunkIntervalMs)
-  {
-    this.accounts             = accounts;
+  public DirectoryReconciler(DirectoryReconciliationClient reconciliationClient, DirectoryManager directoryManager) {
     this.directoryManager     = directoryManager;
     this.reconciliationClient = reconciliationClient;
-    this.reconciliationCache  = reconciliationCache;
-    this.chunkSize            = chunkSize;
-    this.chunkIntervalMs      = chunkIntervalMs;
-    this.workerId             = Hex.toString(Util.generateSecretBytes(16));
   }
 
-  @Override
-  public synchronized void start() {
-    running = true;
-    new Thread(this).start();
-  }
+  public void onCrawlStart() { }
 
-  @Override
-  public synchronized void stop() {
-    running = false;
-    notifyAll();
-    while (!finished) {
-      Util.wait(this);
-    }
-  }
+  public void onCrawlEnd()   { }
 
-  @Override
-  public void run() {
-    long delayMs = chunkIntervalMs;
-
-    while (sleepWhileRunning(getDelayWithJitter(delayMs))) {
-      try {
-        delayMs = getBoundedChunkInterval(chunkIntervalMs);
-        delayMs = doPeriodicWork(delayMs);
-      } catch (Throwable t) {
-        logger.warn("error in directory reconciliation: ", t);
-      }
-    }
-
-    synchronized (this) {
-      finished = true;
-      notifyAll();
-    }
-  }
-
-  @VisibleForTesting
-  public long doPeriodicWork(long intervalMs) {
-    long nextIntervalTimeMs = System.currentTimeMillis() + intervalMs;
-
-    if (reconciliationCache.claimActiveWork(workerId, WORKER_TTL_MS)) {
-      if (processChunk()) {
-        if (!reconciliationCache.isAccelerated()) {
-          long timeUntilNextIntervalMs = getTimeUntilNextInterval(nextIntervalTimeMs);
-          reconciliationCache.claimActiveWork(workerId, timeUntilNextIntervalMs);
-          return timeUntilNextIntervalMs;
-        } else {
-          return ACCELERATED_CHUNK_INTERVAL;
-        }
-      }
-    }
-    return intervalMs;
-  }
-
-  private boolean processChunk() {
-    Optional<String> fromNumber    = reconciliationCache.getLastNumber();
-    List<Account>    chunkAccounts = readChunk(fromNumber, chunkSize);
+  public void onCrawlChunk(List<Account> chunkAccounts) {
 
     updateDirectoryCache(chunkAccounts);
 
-    DirectoryReconciliationRequest  request           = createChunkRequest(fromNumber, chunkAccounts);
+    DirectoryReconciliationRequest  request           = createChunkRequest(chunkAccounts);
     DirectoryReconciliationResponse sendChunkResponse = sendChunk(request);
 
-    if (sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.MISSING || request.getToNumber() == null) {
-      reconciliationCache.clearAccelerate();
-    }
+    logger.debug("send chunk " + sendChunkResponse.getStatus());
 
-    if (sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.OK) {
-      reconciliationCache.setLastNumber(Optional.ofNullable(request.getToNumber()));
-    } else if (sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.MISSING) {
-      reconciliationCache.setLastNumber(Optional.empty());
-    }
-
-    return sendChunkResponse.getStatus() == DirectoryReconciliationResponse.Status.OK;
-  }
-
-  private List<Account> readChunk(Optional<String> fromNumber, int chunkSize) {
-    try (Timer.Context timer = readChunkTimer.time()) {
-      Optional<List<Account>> chunkAccounts;
-
-      if (fromNumber.isPresent()) {
-        chunkAccounts = Optional.ofNullable(accounts.getAllFrom(fromNumber.get(), chunkSize));
-      } else {
-        chunkAccounts = Optional.ofNullable(accounts.getAllFrom(chunkSize));
-      }
-
-      return chunkAccounts.orElse(Collections.emptyList());
-    }
   }
 
   private void updateDirectoryCache(List<Account> accounts) {
@@ -183,7 +80,6 @@ public class DirectoryReconciler implements Managed, Runnable {
         if (account.isActive()) {
           byte[]        token         = Util.getContactToken(account.getNumber());
           ClientContact clientContact = new ClientContact(token, null, true, true);
-
           directoryManager.add(batchOperation, clientContact);
         } else {
           directoryManager.remove(batchOperation, account.getNumber());
@@ -194,15 +90,18 @@ public class DirectoryReconciler implements Managed, Runnable {
     }
   }
 
-  private DirectoryReconciliationRequest createChunkRequest(Optional<String> fromNumber, List<Account> accounts) {
+  private DirectoryReconciliationRequest createChunkRequest(List<Account> accounts) {
     List<String> numbers = accounts.stream()
                                    .filter(Account::isActive)
                                    .map(Account::getNumber)
                                    .collect(Collectors.toList());
 
-    Optional<String> toNumber = Optional.empty();
+    Optional<String> toNumber   = Optional.empty();
+    Optional<String> fromNumber = Optional.empty();
+
     if (!accounts.isEmpty()) {
-      toNumber = Optional.of(accounts.get(accounts.size() - 1).getNumber());
+      fromNumber = Optional.of(accounts.get(0).getNumber());
+      toNumber   = Optional.of(accounts.get(accounts.size() - 1).getNumber());
     }
 
     return new DirectoryReconciliationRequest(fromNumber.orElse(null), toNumber.orElse(null), numbers);
@@ -221,31 +120,6 @@ public class DirectoryReconciler implements Managed, Runnable {
       logger.warn("request error: ", ex);
       throw new ProcessingException(ex);
     }
-  }
-
-  private synchronized boolean sleepWhileRunning(long delayMs) {
-    long startTimeMs = System.currentTimeMillis();
-    while (running && delayMs > 0) {
-      Util.wait(this, delayMs);
-
-      long nowMs = System.currentTimeMillis();
-      delayMs -= Math.abs(nowMs - startTimeMs);
-    }
-    return running;
-  }
-
-  private long getTimeUntilNextInterval(long nextIntervalTimeMs) {
-    long nextIntervalMs = nextIntervalTimeMs - System.currentTimeMillis();
-    return getBoundedChunkInterval(nextIntervalMs);
-  }
-
-  private long getBoundedChunkInterval(long intervalMs) {
-    return Math.max(Math.min(intervalMs, chunkIntervalMs), MINIMUM_CHUNK_INTERVAL);
-  }
-
-  private long getDelayWithJitter(long delayMs) {
-    long randomJitterMs = (long) (new SecureRandom().nextDouble() * JITTER_MAX * delayMs);
-    return delayMs + randomJitterMs;
   }
 
 }

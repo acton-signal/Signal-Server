@@ -184,16 +184,15 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
 
     DirectoryCredentialsGenerator directoryCredentialsGenerator = new DirectoryCredentialsGenerator(config.getDirectoryConfiguration().getDirectoryClientConfiguration().getUserAuthenticationTokenSharedSecret(),
                                                                                                     config.getDirectoryConfiguration().getDirectoryClientConfiguration().getUserAuthenticationTokenUserIdSecret());
-    DirectoryReconciliationCache  directoryReconciliationCache  = new DirectoryReconciliationCache(cacheClient);
     DirectoryReconciliationClient directoryReconciliationClient = new DirectoryReconciliationClient(config.getDirectoryConfiguration().getDirectoryServerConfiguration());
-    DirectoryReconciler           directoryReconciler           = new DirectoryReconciler(directoryReconciliationClient, directoryReconciliationCache, directory, accounts,
-                                                                                          config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkSize(),
-                                                                                          config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkIntervalMs());
+
+    DirectoryReconciler           directoryReconciler           = new DirectoryReconciler(directoryReconciliationClient, directory);
 
     ActiveUserCounter                          activeUserCounter               = new ActiveUserCounter(config.getMetricsFactory(), cacheClient);
     LinkedList<AccountDatabaseCrawlerListener> accountDatabaseCrawlerListeners = new LinkedList<AccountDatabaseCrawlerListener>();
 
     accountDatabaseCrawlerListeners.add(activeUserCounter);
+    accountDatabaseCrawlerListeners.add(directoryReconciler);
     
     AccountDatabaseCrawlerCache accountDatabaseCrawlerCache = new AccountDatabaseCrawlerCache(cacheClient);
     AccountDatabaseCrawler      accountDatabaseCrawler      = new AccountDatabaseCrawler(accounts, accountDatabaseCrawlerCache, accountDatabaseCrawlerListeners, config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkSize(), config.getDirectoryConfiguration().getDirectoryServerConfiguration().getReconciliationChunkIntervalMs());
@@ -205,7 +204,6 @@ public class WhisperServerService extends Application<WhisperServerConfiguration
     environment.lifecycle().manage(pubSubManager);
     environment.lifecycle().manage(pushSender);
     environment.lifecycle().manage(messagesCache);
-    environment.lifecycle().manage(directoryReconciler);
     environment.lifecycle().manage(accountDatabaseCrawler);
 
     AttachmentController attachmentController = new AttachmentController(rateLimiters, urlSigner);
