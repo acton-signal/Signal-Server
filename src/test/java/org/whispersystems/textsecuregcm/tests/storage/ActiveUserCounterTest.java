@@ -58,11 +58,11 @@ public class ActiveUserCounterTest {
   private final Accounts accounts = mock(Accounts.class);
   private final MetricsFactory metricsFactory = mock(MetricsFactory.class);
 
+  /*
   private final ActiveUserCache activeUserCache = mock(ActiveUserCache.class);
   private final ActiveUserCounter activeUserCounter = new ActiveUserCounter(metricsFactory, accounts, activeUserCache);
 
   private long[] EMPTY_TALLIES = {0L,0L,0L,0L,0L};
-
   @Before
   public void setup() {
 
@@ -283,5 +283,5 @@ public class ActiveUserCounterTest {
     verifyNoMoreInteractions(metricsFactory);
     verifyNoMoreInteractions(accounts);
     verifyNoMoreInteractions(activeUserCache);}
-
+*/
 }
