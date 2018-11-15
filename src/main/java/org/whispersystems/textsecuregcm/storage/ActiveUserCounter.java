@@ -48,7 +48,7 @@ public class ActiveUserCounter implements AccountDatabaseCrawlerListener {
   private static final Logger logger = LoggerFactory.getLogger(ActiveUserCounter.class);
 
   private static final String PREFIX           = "active_user_";
-  
+
   private static final String PLATFORM_IOS     = "ios";
   private static final String PLATFORM_ANDROID = "android";
 

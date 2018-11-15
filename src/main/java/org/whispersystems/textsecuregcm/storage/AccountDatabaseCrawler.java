@@ -141,7 +141,7 @@ public class AccountDatabaseCrawler implements Managed, Runnable {
         listener.onCrawlChunk(chunkAccounts);
       cache.setLastNumber(Optional.of(chunkAccounts.get(chunkAccounts.size() - 1).getNumber()));
     }
-    
+
   }
 
   private List<Account> readChunk(Optional<String> fromNumber, int chunkSize) {
@@ -157,7 +157,7 @@ public class AccountDatabaseCrawler implements Managed, Runnable {
       return chunkAccounts;
     }
   }
-  
+
   private synchronized boolean sleepWhileRunning(long delayMs) {
     long startTimeMs = System.currentTimeMillis();
     while (running && delayMs > 0) {
