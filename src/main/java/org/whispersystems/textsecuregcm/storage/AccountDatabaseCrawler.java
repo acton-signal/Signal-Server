@@ -34,7 +34,6 @@ import java.util.UUID;
 import static com.codahale.metrics.MetricRegistry.name;
 import io.dropwizard.lifecycle.Managed;
 
-@SuppressWarnings("OptionalUsedAsFieldOrParameterType")
 public class AccountDatabaseCrawler implements Managed, Runnable {
 
   private static final Logger         logger         = LoggerFactory.getLogger(AccountDatabaseCrawler.class);
