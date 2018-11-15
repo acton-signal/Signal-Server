@@ -123,16 +123,19 @@ public class AccountDatabaseCrawler implements Managed, Runnable {
     Optional<String> fromNumber = cache.getLastNumber();
 
     if (!fromNumber.isPresent()) {
+      logger.info("account database start crawl");
       for (AccountDatabaseCrawlerListener listener : listeners) listener.onCrawlStart();
     }
 
     List<Account> chunkAccounts = readChunk(fromNumber, chunkSize);
 
     if (chunkAccounts.isEmpty()) {
+      logger.info("account database end crawl");
       for (AccountDatabaseCrawlerListener listener : listeners)
         listener.onCrawlEnd();
       cache.setLastNumber(Optional.empty());
     } else {
+      logger.debug("account database chunk crawl " + chunkAccounts.get(0).getNumber());
       for (AccountDatabaseCrawlerListener listener : listeners)
         listener.onCrawlChunk(chunkAccounts);
       cache.setLastNumber(Optional.of(chunkAccounts.get(chunkAccounts.size() - 1).getNumber()));
