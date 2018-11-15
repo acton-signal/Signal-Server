@@ -134,6 +134,7 @@ public class AccountDatabaseCrawler implements Managed, Runnable {
       for (AccountDatabaseCrawlerListener listener : listeners)
         listener.onCrawlEnd();
       cache.setLastNumber(Optional.empty());
+      cache.clearAccelerate();
     } else {
       logger.debug("account database chunk crawl " + chunkAccounts.get(0).getNumber());
       for (AccountDatabaseCrawlerListener listener : listeners)
